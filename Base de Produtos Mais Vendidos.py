@@ -29,7 +29,7 @@ ARQUIVO_BASE_SANKHYA = os.path.join(DIRETORIO_BASE, 'Base de Produtos Mais Vendi
 DIRETORIO_IMAGENS = os.path.join(DIRETORIO_BASE, 'IMAGENS')
 
 # CRITÉRIOS DE EXCLUSÃO (SUBGRUPOS)
-SUBGRUPOS_EXCLUIDOS = ['CHINELO', 'SACOLAS', 'REVENDA']
+SUBGRUPOS_EXCLUIDOS = ['CHINELO', 'SACOLAS', 'REVENDA', 'MARY KAY']
 
 # ------------------------------------
 
@@ -324,4 +324,4 @@ if __name__ == "__main__":
         'CATEGORIA': categoria_input,
     }
     
-    consolidar_relatorio(FILTROS_BUSCA)
+    consolidar_relatorio(FILTROS_BUSCA)  
