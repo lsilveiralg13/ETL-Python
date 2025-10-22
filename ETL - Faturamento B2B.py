@@ -32,6 +32,7 @@ COLUMN_MAPPING_AND_TYPES = {
     'Vlr. Nota': {'new_name': 'valor_faturado', 'type': Numeric(15, 2)}, # DECIMAL para MySQL
     'Desconto total por item': {'new_name': 'desconto', 'type': Numeric(15, 2)}, # DECIMAL para MySQL
     'Descrição (Tipo de Negociação)': {'new_name': 'tipo_negociacao', 'type': String(100)},
+    'BOLETO OU CARTÃO': {'new_name': 'forma_pagamento', 'type': String(50)},
     'Status NF-e': {'new_name': 'status_nfe', 'type': String(50)},
     'Descrição (Tipo de Operação)': {'new_name': 'tipo_operacao', 'type': String(100)},
     'Nro. Único': {'new_name': 'numero_unico', 'type': BigInteger},
