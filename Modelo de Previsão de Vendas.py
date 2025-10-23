@@ -1,7 +1,10 @@
 # ===============================================================
-# 🧠 PROJEÇÃO DE FATURAMENTO - V28.4 (COMPLETA ATÉ DEZ/2028)
+# 🧠 PROJEÇÃO DE FATURAMENTO - V28.5 (COMPLETA + FORMATOS EXTRAS)
 # ===============================================================
-# Corrige o horizonte de previsão para incluir NOV e DEZ de todos os anos
+# Inclui colunas:
+# - DATA_ANO (MMM/AAAA)
+# - MÊS (MMMM)
+# Substitui "Variação % Mês a Mês" por "Crescimento Médio Mês a Mês"
 # ===============================================================
 
 import pandas as pd
@@ -92,13 +95,47 @@ df_final.drop(columns=['y', 'mes'], inplace=True)
 # ===============================================================
 # ➕ ANÁLISE ADICIONAL
 # ===============================================================
-df_final['Variação % Mês a Mês'] = df_final['Faturamento Previsto'].pct_change() * 100
+# 🗓️ Cria colunas auxiliares
+df_final['DATA_ANO'] = df_final['Data'].dt.strftime('%b/%Y')
+df_final['MÊS'] = df_final['Data'].dt.strftime('%B')
+
+# 📈 Substitui variação simples por crescimento médio mês a mês
+df_final['Crescimento Médio Mês a Mês'] = (
+    (df_final['Faturamento Previsto'] / df_final['Faturamento Previsto'].shift(1) - 1) * 100
+)
+df_final['Crescimento Médio Mês a Mês'] = df_final['Crescimento Médio Mês a Mês'].rolling(window=3).mean()
+
 df_final['Projeção Acumulada'] = df_final['Faturamento Previsto'].cumsum()
 
 # ===============================================================
 # 🧾 RESUMO POR ANO
 # ===============================================================
 df_final['Ano'] = df_final['Data'].dt.year
+
+# ===============================================================
+# 🇧🇷 AJUSTES DE LAYOUT E LOCALIZAÇÃO
+# ===============================================================
+import locale
+
+# Tenta definir o idioma para português do Brasil
+try:
+    locale.setlocale(locale.LC_TIME, 'pt_BR.UTF-8')
+except:
+    locale.setlocale(locale.LC_TIME, 'Portuguese_Brazil.1252')
+
+# Reconstrói as colunas com o formato e ordem desejados
+df_final['DATA_ANO'] = df_final['Data'].dt.strftime('%b/%Y').str.capitalize()
+df_final['MÊS'] = df_final['Data'].dt.strftime('%B').str.capitalize()
+df_final['Ano'] = df_final['Data'].dt.year
+
+# Reorganiza a ordem das colunas
+colunas_ordenadas = ['DATA_ANO', 'MÊS', 'Ano'] + [col for col in df_final.columns if col not in ['DATA_ANO', 'MÊS', 'Ano', 'Data']]
+df_final = df_final[colunas_ordenadas]
+
+# Remove a coluna "Data" (não mais necessária)
+if 'Data' in df_final.columns:
+    df_final = df_final.drop(columns=['Data'])
+
 resumo_anual = df_final.groupby('Ano')['Faturamento Previsto'].sum().reset_index()
 resumo_anual = resumo_anual[resumo_anual['Ano'].between(2026, 2028)]
 
@@ -109,7 +146,7 @@ for _, linha in resumo_anual.iterrows():
 # ===============================================================
 # 💾 EXPORTAÇÃO
 # ===============================================================
-arquivo_saida = f"Projecao_Faturamento_V28.4_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
+arquivo_saida = f"PROJEÇÃO DE FATURAMENTO 2023_2028.xlsx"
 with pd.ExcelWriter(arquivo_saida, engine='openpyxl') as writer:
     df_final.to_excel(writer, sheet_name='Projecao_Completa', index=False)
     resumo_anual.to_excel(writer, sheet_name='Resumo_Anual', index=False)
@@ -119,8 +156,8 @@ with pd.ExcelWriter(arquivo_saida, engine='openpyxl') as writer:
 # ===============================================================
 ultimo_mes_previsto = df_resultado['Data'].max()
 print(Fore.GREEN + "\n===============================================================")
-print(Fore.GREEN + "✅ PROJEÇÃO CONCLUÍDA COM SUCESSO - VERSÃO 28.4")
+print(Fore.GREEN + "✅ PROJEÇÃO CONCLUÍDA COM SUCESSO - VERSÃO 28.5")
 print(Fore.CYAN + f"📂 Arquivo salvo: {arquivo_saida}")
 print(Fore.MAGENTA + f"📈 Último mês projetado: {ultimo_mes_previsto.strftime('%b/%Y')}")
-print(Fore.LIGHTYELLOW_EX + "🧮 Inclui NOV e DEZ (2026, 2027, 2028) — projeção fechada por ano!")
+print(Fore.LIGHTYELLOW_EX + "🧮 Inclui NOV e DEZ (2026, 2027, 2028) e colunas DATA_ANO + MÊS")
 print(Fore.GREEN + "===============================================================\n")
