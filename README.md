@@ -29,7 +29,7 @@ Atuo no desenvolvimento de **dashboards, automações em Python, ETL, SQL e VBA*
 
 ## 📈 Projetos em destaque
 
-### 🔹 [Dashboard de Faturamento Multimarcas](#)
+### 🔹 [Dashboard de Faturamento](#)
 > Automação completa em Python e Power BI consolidando KPIs como faturamento total, taxa de conversão, ticket médio e projeções por Inside Sales.
 
 ### 🔹 [Painel Vendedor – Excel + VBA](#)
@@ -44,12 +44,13 @@ Atuo no desenvolvimento de **dashboards, automações em Python, ETL, SQL e VBA*
 ---
 
 ## 📫 Contato
-- 📧 **E-mail:** lucasbarros.data@gmail.com  
-- 💼 **LinkedIn:** [linkedin.com/in/lucasbarros](#)
-- 🧱 **Portfólio GitHub:** [github.com/lucasbarros](#)
+- 📧 **E-mail:** lsilveiralg@gmail.com  
+- 💼 **LinkedIn:** [https://www.linkedin.com/in/lucas-glycon-665000171/](#)
+- 🧱 **Portfólio GitHub:** [https://github.com/lsilveiralg13](#)
 
 ---
 
 > “Dados bem tratados são mais valiosos que ouro — e muito mais úteis.” 💬  
 > — Lucas Barros
+
 
