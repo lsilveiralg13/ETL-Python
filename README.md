@@ -1,6 +1,6 @@
 # 👋 Olá, eu sou o Lucas Barros!
 
-Sou **Analista de Dados** na CTC Franchising (Constance Calçados) e apaixonado por transformar dados em decisões inteligentes.  
+Sou **Analista de Dados**, apaixonado por transformar dados em decisões inteligentes.  
 Atuo no desenvolvimento de **dashboards, automações em Python, ETL, SQL e VBA**, com foco em performance comercial e Business Intelligence.
 
 ---
@@ -52,3 +52,4 @@ Atuo no desenvolvimento de **dashboards, automações em Python, ETL, SQL e VBA*
 
 > “Dados bem tratados são mais valiosos que ouro — e muito mais úteis.” 💬  
 > — Lucas Barros
+
