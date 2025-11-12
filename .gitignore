@@ -1,0 +1,37 @@
+# ======================================
+# 🧩 Projeto ETL-Python | Lucas Glycon
+# ======================================
+
+# ======= CACHE PYTHON =======
+__pycache__/
+*.py[cod]
+*$py.class
+
+# ======= EXCEL / DADOS =======
+*.xlsx
+*.xlsm
+*.csv
+*.ods
+*.tmp
+*.bak
+
+# ======= PASTAS INTERNAS =======
+data/
+outputs/
+IMAGENS/
+
+# ======= AMBIENTE / CONFIG =======
+.vscode/
+.env
+.venv/
+.idea/
+
+# ======= SISTEMA =======
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ======= LOGS / TEMPORÁRIOS =======
+*.log
+*.tmp
+*.cache

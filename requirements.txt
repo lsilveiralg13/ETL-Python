@@ -1,0 +1,15 @@
+# ===============================
+# 📦 ETL-Python | Dependências
+# Autor: Lucas Glycon
+# Projeto: Automação de Relatórios Sankhya (Top 10 Produtos)
+# ===============================
+
+# --- Manipulação e tratamento de dados ---
+pandas>=2.2.2
+
+# --- Leitura e escrita em Excel ---
+openpyxl>=3.1.5
+
+# --- Utilitários do sistema e performance ---
+os-sys
+time
