@@ -8,7 +8,7 @@ Atuo no desenvolvimento de **dashboards, automações em Python, ETL, SQL e VBA*
 ## 🚀 Sobre mim
 - 🎯 Especialista em **Excel Avançado, Python e Power BI**
 - ⚙️ Experiência com **ETL, modelagem de dados e Data Warehouse**
-- 🧩 Forte atuação em **análises de vendas, CRM e performance Inside Sales**
+- 🧩 Forte atuação em **análises de vendas, CRM e Growth Performance**
 - 💡 Apaixonado por **automação de processos** e **dashboards estratégicos**
 - 🧠 Sempre explorando novas formas de unir **dados, tecnologia e negócio**
 
@@ -52,5 +52,6 @@ Atuo no desenvolvimento de **dashboards, automações em Python, ETL, SQL e VBA*
 
 > “Dados bem tratados são mais valiosos que ouro — e muito mais úteis.” 💬  
 > — Lucas Barros
+
 
 
