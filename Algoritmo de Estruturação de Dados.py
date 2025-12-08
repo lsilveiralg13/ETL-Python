@@ -35,6 +35,28 @@ COLUNAS_CADASTRO = [
     "Data Cadastramento",
 ]
 
+# 5) Colunas FIXAS que devem ir para a FATO (aba FATURADO)
+FACT_COLUNAS_FIXAS = [
+    "Parceiro",
+    "Nro. Nota",
+    "Qtd. Itens",
+    "Tipo Negociação",
+    "Vlr. Nota",
+    "Status NF-e",            # nova coluna, ao lado de Vlr. Nota
+    "Desconto total por item",
+    "% de desconto",          # calculada
+    "NOTA PAGA",              # nova coluna calculada
+    "Chave_Mes",              # nova coluna calculada
+    "Chave_Ano",              # nova coluna calculada
+    "Nro. Único",
+    "Dt. Neg.",
+    "Dt. do Faturamento",
+    "CNPJ/CPF do Parceiro",
+    "Nro. DANFE",
+    "Vendedor",
+    "Apelido (Vendedor)",
+]
+
 
 # =============================================================================
 # FUNÇÕES UTILITÁRIAS
@@ -545,11 +567,16 @@ def exportar_para_mysql(
     fato_nome: str,
     pk_escolhida: str | None,
     cols_medidas,
-    cols_datas
+    cols_datas,
+    fact_colunas_fixas=None
 ):
     """
     Cria tabelas dimensão e fato no MySQL e exporta os dados.
     Usa pandas.to_sql (sem constraints avançadas).
+
+    Se fact_colunas_fixas for fornecido, a tabela FATO será criada
+    apenas com essas colunas (se existirem no DataFrame),
+    incluindo colunas calculadas (% de desconto, NOTA PAGA, Chave_Mes, Chave_Ano).
     """
     print("\nIniciando exportação para MySQL (dvwarehouse)...")
 
@@ -595,37 +622,89 @@ def exportar_para_mysql(
         # -------------------------
         # CRIAÇÃO DA FATO
         # -------------------------
-        fact_cols = []
+        df_fato = df.copy()
 
-        if pk_escolhida and pk_escolhida in df.columns:
-            fact_cols.append(pk_escolhida)
+        if fact_colunas_fixas is not None:
+            # ===== COLUNA % de desconto (Desconto total por item / Vlr. Nota), em percentual com 1 casa =====
+            if ("Desconto total por item" in df_fato.columns and
+                "Vlr. Nota" in df_fato.columns):
+                with np.errstate(divide="ignore", invalid="ignore"):
+                    perc = np.where(
+                        df_fato["Vlr. Nota"] != 0,
+                        (df_fato["Desconto total por item"] / df_fato["Vlr. Nota"]) * 100.0,
+                        np.nan
+                    )
+                df_fato["% de desconto"] = np.round(perc, 1)  # 1 casa decimal (ex.: 12.3)
 
-        for dim in sugestao_dimensoes:
-            nk = dim["chave_natural"]
-            if nk in df.columns and nk not in fact_cols:
-                fact_cols.append(nk)
+            # ===== COLUNA NOTA PAGA (baseada em Status NF-e) =====
+            if "Status NF-e" in df_fato.columns:
+                status_upper = df_fato["Status NF-e"].fillna("").astype(str).str.upper()
+                df_fato["NOTA PAGA"] = np.where(status_upper == "APROVADA", "PAGA", "NÃO PAGA")
 
-        for c in cols_datas:
-            if c in df.columns and c not in fact_cols:
-                fact_cols.append(c)
+            # ===== COLUNAS Chave_Mes e Chave_Ano baseadas em Dt. Neg. =====
+            if "Dt. Neg." in df_fato.columns:
+                datas = pd.to_datetime(df_fato["Dt. Neg."], errors="coerce", dayfirst=True)
 
-        for c in cols_medidas:
-            if c in df.columns and c not in fact_cols:
-                fact_cols.append(c)
+                nomes_mes_completo = {
+                    1: "JANEIRO",
+                    2: "FEVEREIRO",
+                    3: "MARÇO",
+                    4: "ABRIL",
+                    5: "MAIO",
+                    6: "JUNHO",
+                    7: "JULHO",
+                    8: "AGOSTO",
+                    9: "SETEMBRO",
+                    10: "OUTUBRO",
+                    11: "NOVEMBRO",
+                    12: "DEZEMBRO",
+                }
 
-        # 🔹 FORÇAR A COLUNA "Apelido (Vendedor)" NA FATO, SE EXISTIR
-        if APELIDO_VENDEDOR_COL in df.columns and APELIDO_VENDEDOR_COL not in fact_cols:
-            fact_cols.append(APELIDO_VENDEDOR_COL)
+                df_fato["Chave_Mes"] = datas.dt.month.map(nomes_mes_completo)
+                df_fato["Chave_Ano"] = datas.dt.year
 
-        if not fact_cols:
-            print("\nNenhuma coluna identificada para a tabela fato. Exportação da fato não será realizada.")
-            return
+            # Seleciona apenas as colunas fixas que existem
+            fact_cols = [c for c in fact_colunas_fixas if c in df_fato.columns]
 
-        fato_df = df[fact_cols].copy()
+            if not fact_cols:
+                print("\nNenhuma das colunas fixas foi encontrada no DataFrame. Fato não será exportada.")
+                return
+
+            fato_df = df_fato[fact_cols].copy()
+
+        else:
+            # LÓGICA ANTIGA (heurística) – mantida como fallback
+            fact_cols = []
+
+            if pk_escolhida and pk_escolhida in df_fato.columns:
+                fact_cols.append(pk_escolhida)
+
+            for dim in sugestao_dimensoes:
+                nk = dim["chave_natural"]
+                if nk in df_fato.columns and nk not in fact_cols:
+                    fact_cols.append(nk)
+
+            for c in cols_datas:
+                if c in df_fato.columns and c not in fact_cols:
+                    fact_cols.append(c)
+
+            for c in cols_medidas:
+                if c in df_fato.columns and c not in fact_cols:
+                    fact_cols.append(c)
+
+            # 🔹 FORÇAR A COLUNA "Apelido (Vendedor)" NA FATO, SE EXISTIR
+            if APELIDO_VENDEDOR_COL in df_fato.columns and APELIDO_VENDEDOR_COL not in fact_cols:
+                fact_cols.append(APELIDO_VENDEDOR_COL)
+
+            if not fact_cols:
+                print("\nNenhuma coluna identificada para a tabela fato. Exportação da fato não será realizada.")
+                return
+
+            fato_df = df_fato[fact_cols].copy()
 
         try:
             fato_df.to_sql(fato_nome, con=engine, if_exists="replace", index=False)
-            print(f"Tabela fato criada: {fato_nome} ({len(fato_df)} linhas). Colunas: {', '.join(fact_cols)}")
+            print(f"Tabela fato criada: {fato_nome} ({len(fato_df)} linhas). Colunas: {', '.join(fato_df.columns)}")
         except Exception as e:
             print(f"Erro ao criar tabela fato {fato_nome}:")
             print(e)
@@ -849,7 +928,8 @@ def analisar_planilha_para_dw(df: pd.DataFrame, nome_tabela_base: str = "fato_ge
             fato_nome=fato_nome,
             pk_escolhida=pk_escolhida,
             cols_medidas=cols_medidas,
-            cols_datas=cols_datas
+            cols_datas=cols_datas,
+            fact_colunas_fixas=FACT_COLUNAS_FIXAS
         )
 
         # Cria e exporta DIM_CALENDARIO
