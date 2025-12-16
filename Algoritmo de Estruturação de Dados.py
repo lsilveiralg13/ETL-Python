@@ -57,6 +57,12 @@ FACT_COLUNAS_FIXAS = [
     "Apelido (Vendedor)",
 ]
 
+# 6) Colunas que NÃO devem virar dimensão
+COLUNAS_BLOQUEAR_DIM = {
+    "parceiro",
+    "nro. nota",
+    "nro_nota",
+}
 
 # =============================================================================
 # FUNÇÕES UTILITÁRIAS
@@ -552,7 +558,7 @@ def exportar_dim_cadastro(
     finally:
         try:
             engine.dispose()
-            print("Conexão com MySQL encerrada (engine.dispose()) para dim_cadastro.")
+            print("Conexão com MySQL encerrada (engine.dispose()).")
         except Exception:
             pass
 
@@ -814,16 +820,28 @@ def analisar_planilha_para_dw(df: pd.DataFrame, nome_tabela_base: str = "fato_ge
     cols_datas = analise_df[analise_df["eh_data"]]["coluna"].tolist()
     cols_dim = analise_df[analise_df["eh_atributo_dimensao"]]["coluna"].tolist()
 
+    # ---- APLICA BLOQUEIO NA CURADORIA DE DIMENSÃO ----
+    mascara_permitidas_dim = ~analise_df["coluna"].str.strip().str.lower().isin(COLUNAS_BLOQUEAR_DIM)
+    analise_dim_candidates = analise_df[analise_df["eh_candidato_chave"] & mascara_permitidas_dim]
+
     # --------------------------------
     # CURADORIA DAS DIMENSÕES (ESCOLHA PELO USUÁRIO)
     # --------------------------------
     print("\n===== COLUNAS CANDIDATAS A CHAVE (POTENCIAIS DIMENSÕES) =====")
-    if cols_chave:
-        print(analise_df[analise_df["eh_candidato_chave"]][
+    if not analise_dim_candidates.empty:
+        print(analise_dim_candidates[
             ["coluna", "dtype", "cardinalidade", "proporcao_unicos", "proporcao_nulos", "nome_parece_id"]
         ].to_string(index=False))
+        bloqueadas_encontradas = sorted(
+            set(
+                analise_df["coluna"].str.strip().str.lower()
+            ) & COLUNAS_BLOQUEAR_DIM
+        )
+        if bloqueadas_encontradas:
+            print("\n[INFO] As seguintes colunas estão bloqueadas para virar dimensão e foram ocultadas na lista:")
+            print("  - " + ", ".join(bloqueadas_encontradas))
     else:
-        print("Nenhuma coluna forte candidata a chave encontrada.")
+        print("Nenhuma coluna forte candidata a chave encontrada (após aplicar bloqueios).")
 
     print("\nCuradoria de dimensões:")
     print("- Essas colunas acima são candidatas a virar DIMENSÃO (ex: nro_nota, id_cliente, id_produto...).")
@@ -834,26 +852,40 @@ def analisar_planilha_para_dw(df: pd.DataFrame, nome_tabela_base: str = "fato_ge
     dim_key_cols = []
 
     if entrada_dims == "":
-        if pk_escolhida:
+        # Só usa PK como dimensão se ela não estiver na lista de bloqueio
+        if pk_escolhida and pk_escolhida.strip().lower() not in COLUNAS_BLOQUEAR_DIM:
             dim_key_cols = [pk_escolhida]
             print(f"\nNenhuma coluna informada. Usando apenas a PRIMARY KEY '{pk_escolhida}' como dimensão.")
         else:
             dim_key_cols = []
-            print("\nNenhuma coluna informada e nenhuma PRIMARY KEY definida. Nenhuma dimensão será criada.")
+            if pk_escolhida and pk_escolhida.strip().lower() in COLUNAS_BLOQUEAR_DIM:
+                print(f"\nNenhuma coluna informada e a PRIMARY KEY '{pk_escolhida}' está bloqueada para dimensão. Nenhuma dimensão será criada.")
+            else:
+                print("\nNenhuma coluna informada e nenhuma PRIMARY KEY definida. Nenhuma dimensão será criada.")
     else:
         nomes_informados = [c.strip() for c in entrada_dims.split(",") if c.strip()]
         colunas_validas = []
         for nome in nomes_informados:
-            if nome in df.columns:
-                colunas_validas.append(nome)
-            else:
+            if nome not in df.columns:
                 print(f"[AVISO] Coluna '{nome}' não encontrada no DataFrame. Ignorando.")
+                continue
+
+            if nome.strip().lower() in COLUNAS_BLOQUEAR_DIM:
+                print(f"[INFO] Coluna '{nome}' está bloqueada para virar dimensão. Ignorando.")
+                continue
+
+            colunas_validas.append(nome)
+
         dim_key_cols = colunas_validas
         print(f"\nDimensões selecionadas pelo usuário (chaves naturais): {', '.join(dim_key_cols) if dim_key_cols else 'nenhuma'}")
 
     # ---- Sugerir dimensões baseadas nas chaves escolhidas ----
     sugestao_dimensoes = []
     for col in dim_key_cols:
+        if col.strip().lower() in COLUNAS_BLOQUEAR_DIM:
+            print(f"[INFO] Pulando criação de dimensão para coluna '{col}' (bloqueada).")
+            continue
+
         tema = extrair_tema_da_chave(col)
         nome_dim = normalizar_nome_dim(tema if tema else col)
         sugestao_dimensoes.append(
