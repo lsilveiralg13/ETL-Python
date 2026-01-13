@@ -1,9 +1,9 @@
 from __future__ import annotations
-
 from pathlib import Path
 import shutil
 from datetime import datetime
 
+# --- CONFIGURAÇÕES DE CAMINHO ---
 TEMPLATE_PATH = Path(
     r"C:\Users\lucasbarros\OneDrive - CTC FRANCHISING S A\Área de Trabalho\HUB MULTIMARCAS\HUB SDR - Versão 6.0.xlsm"
 )
@@ -19,7 +19,6 @@ NOMES_COPIAS = [
     "OPEN.xlsm",
     "OPEN 2.xlsm",
 ]
-
 
 def copiar_com_backup(template: Path, destino_dir: Path, nomes: list[str]) -> None:
     if not template.exists():
@@ -58,21 +57,21 @@ def copiar_com_backup(template: Path, destino_dir: Path, nomes: list[str]) -> No
 
                 shutil.move(str(destino_arquivo), str(backup_path))
                 print(f"[BACKUP] {destino_arquivo.name} -> {backup_path.name}")
-            except PermissionError as e:
-                print(f"[ERRO] Não consegui mover para backup (arquivo pode estar aberto): {destino_arquivo.name}")
-                raise e
+            except PermissionError:
+                print(f"[ERRO] Não consegui mover para backup (arquivo em uso): {destino_arquivo.name}")
+                continue # Pula para o próximo nome em vez de parar o script
 
         # Copia o template para o destino com o novo nome
         try:
             shutil.copy2(str(template), str(destino_arquivo))
             print(f"[OK] Criado/Substituído: {destino_arquivo.name}")
-        except PermissionError as e:
-            print(f"[ERRO] Não consegui copiar (permissão/arquivo aberto): {destino_arquivo.name}")
-            raise e
+        except PermissionError:
+            print(f"[ERRO] Sem permissão de escrita: {destino_arquivo.name}")
+        except Exception as e:
+            print(f"[ERRO FATAL] {destino_arquivo.name}: {e}")
 
     print("-" * 60)
     print("Concluído.")
 
-
 if __name__ == "__main__":
-    copiar_com_backup(TEMPLATE_PATH, DESTINO_DIR, NOMES_COPIAS)
+    copiar_com_backup(TEMPLATE_PATH, DESTINO_DIR, NOMES_COPIAS)''
