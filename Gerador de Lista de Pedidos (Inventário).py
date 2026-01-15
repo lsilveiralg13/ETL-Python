@@ -2,95 +2,87 @@ import pandas as pd
 import warnings
 import os
 
-# Silenciar avisos
+# Silenciar avisos de validação do Excel
 warnings.filterwarnings("ignore", category=UserWarning, module='openpyxl')
 
 ARQUIVO_ENTRADA = 'PEDIDOS INVENTARIO 2026.xlsx'
 ABAS_ALVO = ['ERIKHA', 'OPEN', 'ISABELLA', 'JOSIANE', 'LUCIANA', 'MARCELA', 'ROBERTA']
+
+# Colunas na ordem correta, incluindo agora 'Tamanho'
 COLUNAS_DESEJADAS = [
     'Data Pedido', 'Vendedor', 'Nome Parceiro', 'Cód.Produto', 
-    'Desc. Produto', 'GRADE DISPONÍVEL', 'QTDE', 'Total'
+    'Desc. Produto', 'Tamanho', 'GRADE DISPONÍVEL', 'QTDE', 'Total'
 ]
 
-def localizar_e_filtrar(df, cod_busca, vend_busca):
-    # 1. Tentar encontrar a linha de cabeçalho correta se as colunas não estiverem no topo
-    # Se 'Cód. Parceiro' não estiver nas colunas atuais, procuramos nas primeiras linhas
-    if 'Cód. Parceiro' not in df.columns:
-        for i, row in df.head(10).iterrows():
-            if 'Cód. Parceiro' in row.values:
-                df.columns = row
-                df = df.iloc[i+1:].reset_index(drop=True)
-                break
-    
-    # Garantir que as colunas de filtro existem após a tentativa de correção
-    if 'Cód. Parceiro' in df.columns and 'Vendedor' in df.columns:
-        # Normalização rigorosa
-        df['Cód. Parceiro'] = df['Cód. Parceiro'].astype(str).str.strip().str.replace('.0', '', regex=False)
-        df['Vendedor'] = df['Vendedor'].astype(str).str.strip().str.upper()
-        
-        filtro = (df['Cód. Parceiro'] == str(cod_busca).strip()) & \
-                 (df['Vendedor'] == str(vend_busca).strip().upper())
-        
-        # Filtrar apenas as colunas que realmente existem para evitar erro de KeyError
-        cols_existentes = [c for c in COLUNAS_DESEJADAS if c in df.columns]
-        return df.loc[filtro, cols_existentes]
-    
-    return pd.DataFrame()
-
-def gerar_relatorio_robusto():
+def gerar_relatorio_final():
     if not os.path.exists(ARQUIVO_ENTRADA):
-        print(f"Erro: Arquivo {ARQUIVO_ENTRADA} não encontrado no diretório.")
+        print(f"Erro: O arquivo '{ARQUIVO_ENTRADA}' não foi encontrado.")
         return
 
-    p_busca = input("Digite o Cód. Parceiro: ")
-    v_busca = input("Digite o nome do Vendedor: ")
+    p_busca = input("Digite o Cód. Parceiro: ").strip()
+    v_busca = input("Digite o nome do Vendedor: ").strip().upper()
     
-    lista_resultados = []
+    lista_frames = []
 
-    print("\n🔍 Vasculhando abas...")
+    print(f"\n🔍 Buscando dados para {p_busca} - {v_busca}...")
+
     for aba in ABAS_ALVO:
         try:
-            # Lemos a aba sem definir cabeçalho inicialmente para podermos tratar deslocamentos
-            df_aba = pd.read_excel(ARQUIVO_ENTRADA, sheet_name=aba, header=None if "Sankhya" in aba else 0)
+            df = pd.read_excel(ARQUIVO_ENTRADA, sheet_name=aba)
             
-            # Se lemos sem header, a primeira linha de dados vira a coluna. Ajustamos:
-            if isinstance(df_aba.columns[0], int): 
-                # Tenta achar onde está escrito 'Cód. Parceiro'
-                for i in range(len(df_aba)):
-                    if 'Cód. Parceiro' in df_aba.iloc[i].values:
-                        df_aba.columns = df_aba.iloc[i]
-                        df_aba = df_aba.iloc[i+1:].reset_index(drop=True)
-                        break
+            # Normalização de tipos para a busca
+            df['Cód. Parceiro'] = df['Cód. Parceiro'].astype(str).str.replace('.0', '', regex=False).str.strip()
+            df['Vendedor'] = df['Vendedor'].astype(str).str.strip().str.upper()
             
-            res = localizar_e_filtrar(df_aba, p_busca, v_busca)
-            if not res.empty:
-                lista_resultados.append(res)
-                print(f"✅ Dados encontrados na aba: {aba}")
+            filtro = (df['Cód. Parceiro'] == p_busca) & (df['Vendedor'] == v_busca)
+            
+            # Filtramos garantindo que 'Tamanho' e as outras colunas existam
+            cols_atuais = [c for c in COLUNAS_DESEJADAS if c in df.columns]
+            df_filtrado = df.loc[filtro, cols_atuais].copy()
+            
+            if not df_filtrado.empty:
+                lista_frames.append(df_filtrado)
+                print(f"✅ Dados extraídos da aba: {aba}")
+
         except Exception as e:
-            print(f"⚠️ Erro ao ler aba {aba}: {e}")
+            print(f"⚠️ Erro na aba {aba}: {e}")
 
-    if lista_resultados:
-        df_final = pd.concat(lista_resultados, ignore_index=True)
-        
-        # Conversão de tipos para cálculo
-        df_final['Total'] = pd.to_numeric(df_final['Total'], errors='coerce').fillna(0)
-        df_final['QTDE'] = pd.to_numeric(df_final['QTDE'], errors='coerce').fillna(0)
-        
-        total_valor = df_final['Total'].sum()
-        total_qtd = df_final['QTDE'].sum()
+    if lista_frames:
+        df_consolidado = pd.concat(lista_frames, ignore_index=True)
 
-        print("\n" + "=".center(50, "="))
-        print("RELATÓRIO SINTÉTICO".center(50))
-        print(f"PARCEIRO: {p_busca} | VENDEDOR: {v_busca.upper()}")
-        print(f"TOTAL DE ITENS: {int(total_qtd)}")
-        print(f"VALOR TOTAL: R$ {total_valor:,.2f}")
-        print("=".center(50, "="))
+        # Garantir cálculos numéricos para o rodapé
+        df_consolidado['QTDE'] = pd.to_numeric(df_consolidado['QTDE'], errors='coerce').fillna(0)
+        df_consolidado['Total'] = pd.to_numeric(df_consolidado['Total'], errors='coerce').fillna(0)
 
-        arquivo_saida = f"RELATORIO_{p_busca}_{v_busca.upper()}.xlsx"
-        df_final.to_excel(arquivo_saida, index=False)
-        print(f"\n✨ Sucesso! Relatório gerado: {arquivo_saida}")
+        # Linha de Rodapé com as somas
+        soma_qtde = df_consolidado['QTDE'].sum()
+        soma_total = df_consolidado['Total'].sum()
+
+        linha_total = pd.DataFrame({
+            'Data Pedido': ['TOTALIZADORES:'],
+            'Vendedor': [''],
+            'Nome Parceiro': [''],
+            'Cód.Produto': [''],
+            'Desc. Produto': [''],
+            'Tamanho': [''], # Coluna Tamanho vazia no rodapé
+            'GRADE DISPONÍVEL': [''],
+            'QTDE': [soma_qtde],
+            'Total': [soma_total]
+        })
+
+        df_final = pd.concat([df_consolidado, linha_total], ignore_index=True)
+
+        # Resumo visual no console
+        print("\n" + "="*50)
+        print(f"SOMA QTDE: {int(soma_qtde)}")
+        print(f"SOMA TOTAL: R$ {soma_total:,.2f}")
+        print("="*50)
+
+        nome_arquivo = f"Relatorio_{p_busca}_{v_busca}.xlsx"
+        df_final.to_excel(nome_arquivo, index=False)
+        print(f"\n✨ Arquivo pronto: {nome_arquivo}")
     else:
-        print(f"\n❌ Fim da busca. Nenhum dado localizado para {p_busca} / {v_busca}.")
+        print(f"\n❌ Nenhum registro encontrado para {p_busca} / {v_busca}.")
 
 if __name__ == "__main__":
-    gerar_relatorio_robusto()
+    gerar_relatorio_final()
