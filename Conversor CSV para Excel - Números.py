@@ -279,7 +279,7 @@ def converter_csv_para_xlsx(caminho_arquivo_csv, caminho_arquivo_xlsx_saida):
 # Certifique-se de que o arquivo 'lista.csv' exista no mesmo diretório do script,
 # ou forneça o caminho completo para ele.
 # O arquivo de saída será 'saida_formatada.xlsx'.
-converter_csv_para_xlsx("lista.csv", "saida_formatada.xlsx")
+converter_csv_para_xlsx("Mix de Produtos MM.csv", "Mix_Produtos_MM_Saida.xlsx")
  
 
 
