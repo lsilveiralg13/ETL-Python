@@ -74,4 +74,4 @@ def copiar_com_backup(template: Path, destino_dir: Path, nomes: list[str]) -> No
     print("Concluído.")
 
 if __name__ == "__main__":
-    copiar_com_backup(TEMPLATE_PATH, DESTINO_DIR, NOMES_COPIAS)''
+    copiar_com_backup(TEMPLATE_PATH, DESTINO_DIR, NOMES_COPIAS)
