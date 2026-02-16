@@ -85,18 +85,22 @@ def consolidar_relatorio(filtros: dict):
         if col in df_bruto.columns:
             df_bruto[col] = pd.to_numeric(df_bruto[col], errors='coerce').fillna(0)
 
+    # AJUSTE: Padronização rigorosa de todas as colunas de texto antes de filtrar
     for col in ['CATEGORIA', 'SUBGRUPO', 'COD_UF', 'REGIAO', 'INSIDE_SALES', 'CHAVE_MMM']:
         if col in df_bruto.columns:
             df_bruto[col] = df_bruto[col].astype(str).str.upper().str.strip()
 
-    # 4) Exclusão de subgrupos
+    # 4) Exclusão de subgrupos (AJUSTADO PARA SER INFALÍVEL)
     df_filtrado = df_bruto.copy()
     if SUBGRUPOS_EXCLUIDOS:
-        excluir = [s.upper().strip() for s in SUBGRUPOS_EXCLUIDOS]
+        # Prepara a lista de exclusão
+        excluir = [str(s).upper().strip() for s in SUBGRUPOS_EXCLUIDOS]
         if 'SUBGRUPO' in df_filtrado.columns:
             antes = len(df_filtrado)
-            df_filtrado = df_filtrado[~df_filtrado['SUBGRUPO'].isin(excluir)]
-            print(f"→ Exclusão aplicada: {antes - len(df_filtrado)} linhas removidas ({', '.join(SUBGRUPOS_EXCLUIDOS)}).")
+            # Remove se o nome for idêntico ou se contiver o termo (ex: "CHINELO FEMININO")
+            for termo in excluir:
+                df_filtrado = df_filtrado[~df_filtrado['SUBGRUPO'].str.contains(termo, na=False)]
+            print(f"→ Exclusão aplicada: {antes - len(df_filtrado)} linhas removidas ({', '.join(excluir)}).")
 
     # 5) Filtros interativos
     for coluna, valor in filtros.items():
@@ -105,21 +109,12 @@ def consolidar_relatorio(filtros: dict):
             print(f"→ Filtro: {coluna} = {v}")
             df_filtrado = df_filtrado[df_filtrado[coluna] == v]
 
-    print(f"Base após filtros: {len(df_filtrado)} linhas.")
-    if df_filtrado.empty:
-        print("⚠️ Nenhum dado encontrado após aplicar filtros.")
-        return
-
-   # 5.1) Perguntar se deve filtrar por estoque
+    # 5.1) Filtro por estoque
     opcao_estoque = input("\nDeseja excluir produtos sem estoque? (S/N): ").strip().upper()
-
-    if opcao_estoque == "S":
-        if 'ESTOQUE' in df_filtrado.columns:
-            antes = len(df_filtrado)
-            df_filtrado = df_filtrado[df_filtrado['ESTOQUE'] > 0]
-            print(f"→ Estoque aplicado: {antes - len(df_filtrado)} produtos removidos (ESTOQUE = 0).")
-    else:
-        print("→ Estoque NÃO será filtrado. Mantendo todos os produtos, mesmo com ESTOQUE = 0.")
+    if opcao_estoque == "S" and 'ESTOQUE' in df_filtrado.columns:
+        antes = len(df_filtrado)
+        df_filtrado = df_filtrado[df_filtrado['ESTOQUE'] > 0]
+        print(f"→ Estoque aplicado: {antes - len(df_filtrado)} produtos removidos.")
         
     # 6) Consolidação e ranking
     df_agrup = df_filtrado.groupby(
@@ -145,12 +140,7 @@ def consolidar_relatorio(filtros: dict):
 
     exportar_e_formatar(df_top10, filtros)
 
-# ==========================================================
-# 🎨 EXPORTAÇÃO E FORMATAÇÃO (com imagens)
-# ==========================================================
-
 def exportar_e_formatar(df_dados, filtros):
-
     uf = filtros.get('COD_UF', '') or filtros.get('REGIAO', '') or filtros.get('INSIDE_SALES', 'GERAL')
     cat = filtros.get('CATEGORIA', 'TODAS')
     nome_arquivo = f"Relatorio_Top10_{uf}_{cat}_{time.strftime('%Y%m%d_%H%M%S')}.xlsx"
@@ -172,11 +162,7 @@ def exportar_e_formatar(df_dados, filtros):
     try:
         wb = load_workbook(caminho_saida)
         ws = wb['Top_10_Consolidado']
-
-        try:
-            ws.views.sheetView[0].showGridlines = False
-        except Exception:
-            pass
+        ws.views.sheetView[0].showGridlines = False
 
         style_center = Alignment(horizontal='center', vertical='center', wrap_text=True)
         font_titulo = Font(color="FFFFFFFF", bold=True, size=14)
@@ -199,93 +185,52 @@ def exportar_e_formatar(df_dados, filtros):
 
         ws.row_dimensions[1].height = 19
         ws.row_dimensions[2].height = 19
-        for row_num in range(3, 13):
-            ws.row_dimensions[row_num].height = 50
+        
+        # AJUSTE: Altura das linhas para todas as linhas de dados do Top 10
+        for i in range(3, len(df_dados) + 3):
+            ws.row_dimensions[i].height = 80
 
-        for col_num in range(1, 7):
-            ws.cell(row=2, column=col_num).alignment = style_center
-        for row_num in range(3, 13):
-            for col_num in range(1, 7):
-                ws.cell(row=row_num, column=col_num).alignment = style_center
-
-        print("\n[SUCESSO] Relatório tabular exportado. Inserindo imagens...")
+        print("\n[SUCESSO] Inserindo imagens...")
         for index, row in df_dados.iterrows():
-
             codigo = str(row['CODIGO_SANKHYA']).strip()
-
-            p_jpg  = os.path.join(DIRETORIO_IMAGENS, f"{codigo}.jpg")
-            p_png  = os.path.join(DIRETORIO_IMAGENS, f"{codigo}.png")
-            p_jpeg = os.path.join(DIRETORIO_IMAGENS, f"{codigo}.jpeg")
+            row_excel = index + 3
 
             img_path = None
-            if os.path.exists(p_jpg):
-                img_path = p_jpg
-            elif os.path.exists(p_png):
-                img_path = p_png
-            elif os.path.exists(p_jpeg):
-                img_path = p_jpeg
-
-            if index < 5:
-                status = "ENCONTRADA" if img_path else "NÃO ENCONTRADA"
-                print(f"  DIAGNÓSTICO ({codigo}): Imagem {status}")
-
-            row_excel = index + 3
+            for ext in ['.jpg', '.png', '.jpeg']:
+                p = os.path.join(DIRETORIO_IMAGENS, f"{codigo}{ext}")
+                if os.path.exists(p):
+                    img_path = p
+                    break
 
             if img_path:
                 try:
                     img = OpenpyxlImage(img_path)
-                    img.width = 80
-                    img.height = 80
+                    img.width, img.height = 100, 100
                     ws.add_image(img, f'D{row_excel}')
                 except Exception as img_e:
-                    ws.cell(row=row_excel, column=4, value="ERRO INSERÇÃO").alignment = style_center
-                    print(f"  ERRO ao inserir imagem {codigo}: {img_e}")
+                    ws.cell(row=row_excel, column=4, value="ERRO").alignment = style_center
             else:
-                ws.cell(row=row_excel, column=4, value="Img. não encontrada").alignment = style_center
+                ws.cell(row=row_excel, column=4, value="N/A").alignment = style_center
+
+            for col_num in range(1, 7):
+                ws.cell(row=row_excel, column=col_num).alignment = style_center
 
         wb.save(caminho_saida)
-        print(f"[SUCESSO] Exportação final concluída: {caminho_saida}")
+        print(f"[SUCESSO] Relatório: {nome_arquivo}")
 
-    except PermissionError as e:
-        print(f"❌ ERRO: Não foi possível salvar. Arquivo aberto? {e}")
     except Exception as e:
-        print(f"❌ Erro ao manipular Excel: {e}")
-
-# ==========================================================
-# 🧭 EXECUÇÃO INTERATIVA
-# ==========================================================
+        print(f"❌ Erro ao formatar: {e}")
 
 if __name__ == "__main__":
-    os.makedirs(DIRETORIO_IMAGENS, exist_ok=True)
     print("\n--- TIPO DE PESQUISA ---")
-    print("1 - Por Estado (UF)")
-    print("2 - Por Região")
-    print("3 - Por Inside Sales")
-    opcao = input("Selecione (1, 2 ou 3): ").strip()
-
+    print("1 - Por Estado (UF) | 2 - Por Região | 3 - Por Inside Sales")
+    opcao = input("Selecione: ").strip()
     filtros = {}
     if opcao == "1":
-        uf = input("Informe o Código UF (Ex: SP, RJ). Deixe vazio p/ todas: ").strip()
-        cat = input("Informe o GRUPO (Ex: CALÇADOS, ACESSÓRIOS). Deixe vazio p/ todos: ").strip()
-        filtros = {'COD_UF': uf, 'CATEGORIA': cat}
-
+        filtros = {'COD_UF': input("UF: ").strip(), 'CATEGORIA': input("GRUPO: ").strip()}
     elif opcao == "2":
-        regiao = input("Informe a REGIÃO (NORTE, NORDESTE, CENTRO-OESTE, SUDESTE, SUL). Deixe vazio p/ todas: ").strip()
-        cat = input("Informe o GRUPO (Ex: CALÇADOS, ACESSÓRIOS). Deixe vazio p/ todos: ").strip()
-        filtros = {'REGIAO': regiao, 'CATEGORIA': cat}
-
+        filtros = {'REGIAO': input("Região: ").strip(), 'CATEGORIA': input("GRUPO: ").strip()}
     elif opcao == "3":
-        isales = input("Informe o nome do Inside Sales (Ex: MARCELAVAZ, JOSIANEVIEIRA). Deixe vazio p/ todos: ").strip()
-        cat = input("Informe o GRUPO (Ex: CALÇADOS, ACESSÓRIOS). Deixe vazio p/ todos: ").strip()
-        filtros = {'INSIDE_SALES': isales, 'CATEGORIA': cat}
-
-    else:
-        print("❌ Opção inválida.")
-        raise SystemExit
-
-    print(f"\n→ Aplicando exclusão automática dos subgrupos: {', '.join(SUBGRUPOS_EXCLUIDOS)}")
-
+        filtros = {'INSIDE_SALES': input("Vendedora: ").strip(), 'CATEGORIA': input("GRUPO: ").strip()}
+    
     consolidar_relatorio(filtros)
-    
-    
-    
