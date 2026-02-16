@@ -20,8 +20,6 @@ COLUNAS_CHAVE = {
     'QUANTIDADE': 'Quantidade',
     'VALOR': 'Faturado',
     'ESTOQUE': 'Estoque',
-
-    # NOVAS COLUNAS PARA PESQUISA (nomes exatos do cabeçalho no Excel)
     'ESTADO_IS': 'ESTADO/IS',
     'REGIAO': 'REGIÃO',
 }
@@ -42,12 +40,6 @@ def consolidar_relatorio(filtros: dict):
     try:
         df_bruto = pd.read_excel(ARQUIVO_BASE_SANKHYA, sheet_name='BASE PRODUTOS')
         print(f"Base Sankhya lida com sucesso. Total de {len(df_bruto)} linhas.")
-    except PermissionError as e:
-        print(f"❌ ERRO de permissão: {e}\nFeche o arquivo no Excel/OneDrive e rode novamente.")
-        return
-    except FileNotFoundError:
-        print(f"❌ ERRO: Arquivo não encontrado em:\n{ARQUIVO_BASE_SANKHYA}")
-        return
     except Exception as e:
         print(f"❌ ERRO ao ler planilha: {e}")
         return
@@ -77,7 +69,11 @@ def consolidar_relatorio(filtros: dict):
     if 'INSIDE_SALES' not in df_bruto.columns and len(df_bruto.columns) >= 21:
         df_bruto.rename(columns={df_bruto.columns[20]: 'INSIDE_SALES'}, inplace=True)
 
-    # 3) Garantias de tipos/padronização
+    # 3) PADRONIZAÇÃO (Mover para antes da exclusão para garantir o filtro)
+    for col in ['CATEGORIA', 'SUBGRUPO', 'COD_UF', 'REGIAO', 'INSIDE_SALES', 'CHAVE_MMM']:
+        if col in df_bruto.columns:
+            df_bruto[col] = df_bruto[col].astype(str).str.upper().str.strip()
+
     if 'CODIGO_SANKHYA' in df_bruto.columns:
         df_bruto['CODIGO_SANKHYA'] = df_bruto['CODIGO_SANKHYA'].astype(str).str.strip()
 
@@ -85,41 +81,32 @@ def consolidar_relatorio(filtros: dict):
         if col in df_bruto.columns:
             df_bruto[col] = pd.to_numeric(df_bruto[col], errors='coerce').fillna(0)
 
-    for col in ['CATEGORIA', 'SUBGRUPO', 'COD_UF', 'REGIAO', 'INSIDE_SALES', 'CHAVE_MMM']:
-        if col in df_bruto.columns:
-            df_bruto[col] = df_bruto[col].astype(str).str.upper().str.strip()
-
-    # 4) Exclusão de subgrupos
-    df_filtrado = df_bruto.copy()
-    if SUBGRUPOS_EXCLUIDOS:
-        excluir = [s.upper().strip() for s in SUBGRUPOS_EXCLUIDOS]
-        if 'SUBGRUPO' in df_filtrado.columns:
-            antes = len(df_filtrado)
-            df_filtrado = df_filtrado[~df_filtrado['SUBGRUPO'].isin(excluir)]
-            print(f"→ Exclusão aplicada: {antes - len(df_filtrado)} linhas removidas ({', '.join(SUBGRUPOS_EXCLUIDOS)}).")
+    # 4) EXCLUSÃO DE SUBGRUPOS (Aplicada na base bruta antes do filtro interativo)
+    if 'SUBGRUPO' in df_bruto.columns:
+        excluir = [str(s).upper().strip() for s in SUBGRUPOS_EXCLUIDOS]
+        antes = len(df_bruto)
+        df_bruto = df_bruto[~df_bruto['SUBGRUPO'].isin(excluir)]
+        print(f"→ Exclusão aplicada: {antes - len(df_bruto)} linhas removidas ({', '.join(excluir)}).")
 
     # 5) Filtros interativos
+    df_filtrado = df_bruto.copy()
     for coluna, valor in filtros.items():
         if valor and coluna in df_filtrado.columns:
-            v = valor.upper().strip()
+            v = str(valor).upper().strip()
             print(f"→ Filtro: {coluna} = {v}")
             df_filtrado = df_filtrado[df_filtrado[coluna] == v]
 
-    print(f"Base após filtros: {len(df_filtrado)} linhas.")
     if df_filtrado.empty:
         print("⚠️ Nenhum dado encontrado após aplicar filtros.")
         return
 
-   # 5.1) Perguntar se deve filtrar por estoque
+    # 5.1) Filtro de estoque
     opcao_estoque = input("\nDeseja excluir produtos sem estoque? (S/N): ").strip().upper()
-
     if opcao_estoque == "S":
         if 'ESTOQUE' in df_filtrado.columns:
             antes = len(df_filtrado)
             df_filtrado = df_filtrado[df_filtrado['ESTOQUE'] > 0]
             print(f"→ Estoque aplicado: {antes - len(df_filtrado)} produtos removidos (ESTOQUE = 0).")
-    else:
-        print("→ Estoque NÃO será filtrado. Mantendo todos os produtos, mesmo com ESTOQUE = 0.")
         
     # 6) Consolidação e ranking
     df_agrup = df_filtrado.groupby(
@@ -138,19 +125,14 @@ def consolidar_relatorio(filtros: dict):
         .reset_index(drop=True)
     )
 
-    if 'CODIGO_SANKHYA' in df_top10.columns:
-        df_top10['CODIGO_SANKHYA'] = df_top10['CODIGO_SANKHYA'].astype(str).str.strip()
-
-    print(f"✅ Relatório final pronto. Total de {len(df_top10)} produtos (Top 10 por categoria).")
-
+    print(f"✅ Relatório final pronto com {len(df_top10)} produtos.")
     exportar_e_formatar(df_top10, filtros)
 
 # ==========================================================
-# 🎨 EXPORTAÇÃO E FORMATAÇÃO (com imagens)
+# 🎨 EXPORTAÇÃO E FORMATAÇÃO
 # ==========================================================
 
 def exportar_e_formatar(df_dados, filtros):
-
     uf = filtros.get('COD_UF', '') or filtros.get('REGIAO', '') or filtros.get('INSIDE_SALES', 'GERAL')
     cat = filtros.get('CATEGORIA', 'TODAS')
     nome_arquivo = f"Relatorio_Top10_{uf}_{cat}_{time.strftime('%Y%m%d_%H%M%S')}.xlsx"
@@ -172,118 +154,63 @@ def exportar_e_formatar(df_dados, filtros):
     try:
         wb = load_workbook(caminho_saida)
         ws = wb['Top_10_Consolidado']
-
-        try:
-            ws.views.sheetView[0].showGridlines = False
-        except Exception:
-            pass
+        ws.views.sheetView[0].showGridlines = False
 
         style_center = Alignment(horizontal='center', vertical='center', wrap_text=True)
-        font_titulo = Font(color="FFFFFFFF", bold=True, size=14)
-        cor_preta   = '00000000'
+        cor_preta = '00000000'
 
         ws.insert_cols(4)
         ws.cell(row=2, column=4, value="Foto").alignment = style_center
 
-        titulo = f"TOP 10 - {cat.upper()} MAIS VENDIDOS - {uf.upper()}"
         ws.merge_cells('A1:F1')
-        titulo_cell = ws['A1']
-        titulo_cell.value = titulo
-        titulo_cell.fill = PatternFill(start_color=cor_preta, end_color=cor_preta, fill_type="solid")
-        titulo_cell.font = font_titulo
-        titulo_cell.alignment = Alignment(horizontal='center', vertical='center')
+        ws['A1'].value = f"TOP 10 - {cat.upper()} MAIS VENDIDOS - {uf.upper()}"
+        ws['A1'].fill = PatternFill(start_color=cor_preta, end_color=cor_preta, fill_type="solid")
+        ws['A1'].font = Font(color="FFFFFFFF", bold=True, size=14)
+        ws['A1'].alignment = Alignment(horizontal='center', vertical='center')
 
         larguras = {'A': 15.09, 'B': 15.09, 'C': 42.09, 'D': 20, 'E': 15.09, 'F': 15.09}
         for col, width in larguras.items():
             ws.column_dimensions[col].width = width
 
-        ws.row_dimensions[1].height = 19
-        ws.row_dimensions[2].height = 19
-        for row_num in range(3, 13):
+        for row_num in range(3, len(df_dados) + 3):
             ws.row_dimensions[row_num].height = 50
 
-        for col_num in range(1, 7):
-            ws.cell(row=2, column=col_num).alignment = style_center
-        for row_num in range(3, 13):
-            for col_num in range(1, 7):
-                ws.cell(row=row_num, column=col_num).alignment = style_center
-
-        print("\n[SUCESSO] Relatório tabular exportado. Inserindo imagens...")
+        print("\n→ Inserindo imagens no Excel...")
         for index, row in df_dados.iterrows():
-
             codigo = str(row['CODIGO_SANKHYA']).strip()
-
-            p_jpg  = os.path.join(DIRETORIO_IMAGENS, f"{codigo}.jpg")
-            p_png  = os.path.join(DIRETORIO_IMAGENS, f"{codigo}.png")
-            p_jpeg = os.path.join(DIRETORIO_IMAGENS, f"{codigo}.jpeg")
-
             img_path = None
-            if os.path.exists(p_jpg):
-                img_path = p_jpg
-            elif os.path.exists(p_png):
-                img_path = p_png
-            elif os.path.exists(p_jpeg):
-                img_path = p_jpeg
-
-            if index < 5:
-                status = "ENCONTRADA" if img_path else "NÃO ENCONTRADA"
-                print(f"  DIAGNÓSTICO ({codigo}): Imagem {status}")
+            for ext in ['.jpg', '.png', '.jpeg']:
+                p = os.path.join(DIRETORIO_IMAGENS, f"{codigo}{ext}")
+                if os.path.exists(p):
+                    img_path = p
+                    break
 
             row_excel = index + 3
-
             if img_path:
                 try:
                     img = OpenpyxlImage(img_path)
-                    img.width = 80
-                    img.height = 80
+                    img.width, img.height = 80, 80
                     ws.add_image(img, f'D{row_excel}')
-                except Exception as img_e:
-                    ws.cell(row=row_excel, column=4, value="ERRO INSERÇÃO").alignment = style_center
-                    print(f"  ERRO ao inserir imagem {codigo}: {img_e}")
+                except:
+                    ws.cell(row=row_excel, column=4, value="Erro Img")
             else:
-                ws.cell(row=row_excel, column=4, value="Img. não encontrada").alignment = style_center
+                ws.cell(row=row_excel, column=4, value="S/ Img")
 
         wb.save(caminho_saida)
-        print(f"[SUCESSO] Exportação final concluída: {caminho_saida}")
+        print(f"[SUCESSO] Relatório: {caminho_saida}")
 
-    except PermissionError as e:
-        print(f"❌ ERRO: Não foi possível salvar. Arquivo aberto? {e}")
     except Exception as e:
-        print(f"❌ Erro ao manipular Excel: {e}")
-
-# ==========================================================
-# 🧭 EXECUÇÃO INTERATIVA
-# ==========================================================
+        print(f"❌ Erro na formatação: {e}")
 
 if __name__ == "__main__":
     os.makedirs(DIRETORIO_IMAGENS, exist_ok=True)
-    print("\n--- TIPO DE PESQUISA ---")
-    print("1 - Por Estado (UF)")
-    print("2 - Por Região")
-    print("3 - Por Inside Sales")
-    opcao = input("Selecione (1, 2 ou 3): ").strip()
-
+    print("\n1-UF | 2-Região | 3-Inside Sales")
+    opcao = input("Opção: ").strip()
     filtros = {}
-    if opcao == "1":
-        uf = input("Informe o Código UF (Ex: SP, RJ). Deixe vazio p/ todas: ").strip()
-        cat = input("Informe o GRUPO (Ex: CALÇADOS, ACESSÓRIOS). Deixe vazio p/ todos: ").strip()
-        filtros = {'COD_UF': uf, 'CATEGORIA': cat}
-
-    elif opcao == "2":
-        regiao = input("Informe a REGIÃO (NORTE, NORDESTE, CENTRO-OESTE, SUDESTE, SUL). Deixe vazio p/ todas: ").strip()
-        cat = input("Informe o GRUPO (Ex: CALÇADOS, ACESSÓRIOS). Deixe vazio p/ todos: ").strip()
-        filtros = {'REGIAO': regiao, 'CATEGORIA': cat}
-
-    elif opcao == "3":
-        isales = input("Informe o nome do Inside Sales (Ex: MARCELAVAZ, JOSIANEVIEIRA). Deixe vazio p/ todos: ").strip()
-        cat = input("Informe o GRUPO (Ex: CALÇADOS, ACESSÓRIOS). Deixe vazio p/ todos: ").strip()
-        filtros = {'INSIDE_SALES': isales, 'CATEGORIA': cat}
-
+    if opcao in ["1", "2", "3"]:
+        target = "COD_UF" if opcao == "1" else "REGIAO" if opcao == "2" else "INSIDE_SALES"
+        filtros[target] = input(f"Informe {target}: ").strip()
+        filtros['CATEGORIA'] = input("Categoria: ").strip()
+        consolidar_relatorio(filtros)
     else:
-        print("❌ Opção inválida.")
-        raise SystemExit
-
-    print(f"\n→ Aplicando exclusão automática dos subgrupos: {', '.join(SUBGRUPOS_EXCLUIDOS)}")
-
-    consolidar_relatorio(filtros)
-    
+        print("❌ Inválido.")
