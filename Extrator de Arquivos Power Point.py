@@ -2,7 +2,7 @@ import os
 import win32com.client
 
 # Caminho da pasta onde estão os PPTX
-pasta_pptx = r"Z:\Comercial\5 - Multimarcas\SDR\Cards Lojas Multimarcas\2025\12 - Dezembro"
+pasta_pptx = r"Z:\Comercial\5 - Multimarcas\SDR\Cards Lojas Multimarcas\2026\01 - Janeiro"
 # Pasta de destino das imagens completas (cards)
 pasta_saida = r"C:\Users\lucasbarros\OneDrive - CTC FRANCHISING S A\Área de Trabalho\Cards_Exportados"
 
