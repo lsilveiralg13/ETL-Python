@@ -28,7 +28,7 @@ DIRETORIO_BASE = os.path.abspath(r'C:\Users\lucasbarros\OneDrive - CTC FRANCHISI
 ARQUIVO_BASE_SANKHYA = os.path.join(DIRETORIO_BASE, 'Base de Produtos Mais Vendidos - Showroom.xlsx')
 DIRETORIO_IMAGENS = os.path.join(DIRETORIO_BASE, 'IMAGENS')
 
-SUBGRUPOS_EXCLUIDOS = ['CHINELO', 'SACOLAS', 'REVENDA', 'MARY KAY']
+SUBGRUPOS_PARA_PERGUNTAR = ['CHINELO', 'SACOLAS', 'REVENDA', 'MARY KAY']
 
 # ==========================================================
 # 🚀 FUNÇÃO PRINCIPAL
@@ -46,7 +46,7 @@ def consolidar_relatorio(filtros: dict):
 
     df_bruto.columns = df_bruto.columns.str.strip()
 
-    # 2) Renomear colunas para nomes internos
+    # 2) Renomear colunas
     mapa_renomeacao = {
         COLUNAS_CHAVE['COD_PRODUTO']: 'CODIGO_SANKHYA',
         COLUNAS_CHAVE['REFERENCIA']: 'REFERENCIA_PRODUTO',
@@ -69,7 +69,7 @@ def consolidar_relatorio(filtros: dict):
     if 'INSIDE_SALES' not in df_bruto.columns and len(df_bruto.columns) >= 21:
         df_bruto.rename(columns={df_bruto.columns[20]: 'INSIDE_SALES'}, inplace=True)
 
-    # 3) PADRONIZAÇÃO (Mover para antes da exclusão para garantir o filtro)
+    # 3) Padronização inicial
     for col in ['CATEGORIA', 'SUBGRUPO', 'COD_UF', 'REGIAO', 'INSIDE_SALES', 'CHAVE_MMM']:
         if col in df_bruto.columns:
             df_bruto[col] = df_bruto[col].astype(str).str.upper().str.strip()
@@ -81,12 +81,19 @@ def consolidar_relatorio(filtros: dict):
         if col in df_bruto.columns:
             df_bruto[col] = pd.to_numeric(df_bruto[col], errors='coerce').fillna(0)
 
-    # 4) EXCLUSÃO DE SUBGRUPOS (Aplicada na base bruta antes do filtro interativo)
+    # 4) EXCLUSÃO INTERATIVA DE SUBGRUPOS
     if 'SUBGRUPO' in df_bruto.columns:
-        excluir = [str(s).upper().strip() for s in SUBGRUPOS_EXCLUIDOS]
-        antes = len(df_bruto)
-        df_bruto = df_bruto[~df_bruto['SUBGRUPO'].isin(excluir)]
-        print(f"→ Exclusão aplicada: {antes - len(df_bruto)} linhas removidas ({', '.join(excluir)}).")
+        print("\n--- VALIDAÇÃO DE EXCLUSÃO DE SUBGRUPOS ---")
+        subgrupos_a_excluir = []
+        for sg in SUBGRUPOS_PARA_PERGUNTAR:
+            resp = input(f"Deseja EXCLUIR o subgrupo '{sg}' do relatório? (S/N): ").strip().upper()
+            if resp == 'S':
+                subgrupos_a_excluir.append(sg)
+        
+        if subgrupos_a_excluir:
+            antes = len(df_bruto)
+            df_bruto = df_bruto[~df_bruto['SUBGRUPO'].isin(subgrupos_a_excluir)]
+            print(f"→ Aplicado: {antes - len(df_bruto)} linhas removidas ({', '.join(subgrupos_a_excluir)}).")
 
     # 5) Filtros interativos
     df_filtrado = df_bruto.copy()
@@ -106,8 +113,8 @@ def consolidar_relatorio(filtros: dict):
         if 'ESTOQUE' in df_filtrado.columns:
             antes = len(df_filtrado)
             df_filtrado = df_filtrado[df_filtrado['ESTOQUE'] > 0]
-            print(f"→ Estoque aplicado: {antes - len(df_filtrado)} produtos removidos (ESTOQUE = 0).")
-        
+            print(f"→ Estoque aplicado: {antes - len(df_filtrado)} produtos removidos.")
+
     # 6) Consolidação e ranking
     df_agrup = df_filtrado.groupby(
         ['REFERENCIA_PRODUTO', 'CODIGO_SANKHYA', 'DESCRICAO_PRODUTO', 'CATEGORIA']
@@ -118,18 +125,17 @@ def consolidar_relatorio(filtros: dict):
     ).astype(int)
 
     df_top10 = (
-        df_agrup[df_agrup['RANK_CATEGORIA'] <= 10]
+        df_agrup[df_agrup['RANK_CATEGORIA'] <= 40]
         .sort_values(by=['CATEGORIA', 'RANK_CATEGORIA', 'VENDAS_TOTAIS'], ascending=[True, True, False])
         .groupby('CATEGORIA')
-        .head(10)
+        .head(40)
         .reset_index(drop=True)
     )
 
-    print(f"✅ Relatório final pronto com {len(df_top10)} produtos.")
     exportar_e_formatar(df_top10, filtros)
 
 # ==========================================================
-# 🎨 EXPORTAÇÃO E FORMATAÇÃO
+# 🎨 EXPORTAÇÃO E FORMATAÇÃO (ESTÉTICA COMPLETA)
 # ==========================================================
 
 def exportar_e_formatar(df_dados, filtros):
@@ -157,23 +163,33 @@ def exportar_e_formatar(df_dados, filtros):
         ws.views.sheetView[0].showGridlines = False
 
         style_center = Alignment(horizontal='center', vertical='center', wrap_text=True)
+        font_titulo = Font(color="FFFFFFFF", bold=True, size=14)
         cor_preta = '00000000'
 
         ws.insert_cols(4)
         ws.cell(row=2, column=4, value="Foto").alignment = style_center
 
+        # Título Formatado
         ws.merge_cells('A1:F1')
         ws['A1'].value = f"TOP 10 - {cat.upper()} MAIS VENDIDOS - {uf.upper()}"
         ws['A1'].fill = PatternFill(start_color=cor_preta, end_color=cor_preta, fill_type="solid")
-        ws['A1'].font = Font(color="FFFFFFFF", bold=True, size=14)
+        ws['A1'].font = font_titulo
         ws['A1'].alignment = Alignment(horizontal='center', vertical='center')
 
+        # Larguras e Alturas
         larguras = {'A': 15.09, 'B': 15.09, 'C': 42.09, 'D': 20, 'E': 15.09, 'F': 15.09}
         for col, width in larguras.items():
             ws.column_dimensions[col].width = width
 
+        ws.row_dimensions[1].height = 19
+        ws.row_dimensions[2].height = 19
         for row_num in range(3, len(df_dados) + 3):
             ws.row_dimensions[row_num].height = 50
+
+        # Alinhamento Geral
+        for row in ws.iter_rows(min_row=2, max_row=len(df_dados)+2, min_col=1, max_col=6):
+            for cell in row:
+                cell.alignment = style_center
 
         print("\n→ Inserindo imagens no Excel...")
         for index, row in df_dados.iterrows():
@@ -191,7 +207,7 @@ def exportar_e_formatar(df_dados, filtros):
                     img = OpenpyxlImage(img_path)
                     img.width, img.height = 80, 80
                     ws.add_image(img, f'D{row_excel}')
-                except:
+                except Exception:
                     ws.cell(row=row_excel, column=4, value="Erro Img")
             else:
                 ws.cell(row=row_excel, column=4, value="S/ Img")
@@ -207,10 +223,13 @@ if __name__ == "__main__":
     print("\n1-UF | 2-Região | 3-Inside Sales")
     opcao = input("Opção: ").strip()
     filtros = {}
-    if opcao in ["1", "2", "3"]:
-        target = "COD_UF" if opcao == "1" else "REGIAO" if opcao == "2" else "INSIDE_SALES"
-        filtros[target] = input(f"Informe {target}: ").strip()
-        filtros['CATEGORIA'] = input("Categoria: ").strip()
-        consolidar_relatorio(filtros)
-    else:
-        print("❌ Inválido.")
+    if opcao == "1":
+        filtros['COD_UF'] = input("Informe UF: ").strip()
+    elif opcao == "2":
+        filtros['REGIAO'] = input("Informe Região: ").strip()
+    elif opcao == "3":
+        filtros['INSIDE_SALES'] = input("Informe Inside Sales: ").strip()
+    
+    filtros['CATEGORIA'] = input("Categoria: ").strip()
+    consolidar_relatorio(filtros)
+    
