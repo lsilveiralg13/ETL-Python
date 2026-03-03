@@ -1,0 +1,16 @@
+===== RELATORIO ETL CRM =====
+Data/Hora: 2025-11-13 14:11:41.379433
+
+Total de leads tratados: 2026
+
+Leads por SDR:
+  - ANDRÉ: 826
+  - RAIANE: 670
+  - DUDA: 259
+  - SCARLAT: 157
+  - ROBERTA: 113
+  - TARVYLLA: 1
+
+Leads por Status:
+  - Prospecção: 1907
+  - Negociação: 3

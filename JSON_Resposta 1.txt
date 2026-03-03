@@ -1,0 +1,52 @@
+[
+    {
+        "status": "Íntegro",
+        "empresa": "EMPRESA 3",
+        "detalhes": {
+            "registros_processados": 50
+        },
+        "total_ativo": -2712.0,
+        "total_passivo": 2712.0,
+        "check_integridade": 0.0
+    },
+    {
+        "status": "Íntegro",
+        "empresa": "EMPRESA 1",
+        "detalhes": {
+            "registros_processados": 25
+        },
+        "total_ativo": -1511.28,
+        "total_passivo": 1511.28,
+        "check_integridade": 0.0
+    },
+    {
+        "status": "Inconsistente",
+        "empresa": "EMPRESA 2",
+        "detalhes": {
+            "registros_processados": 25
+        },
+        "total_ativo": 95872021.44,
+        "total_passivo": -95872378.65,
+        "check_integridade": -357.21
+    },
+    {
+        "status": "Inconsistente",
+        "empresa": "EMPRESA 4",
+        "detalhes": {
+            "registros_processados": 25
+        },
+        "total_ativo": -1336.32,
+        "total_passivo": 1542.89,
+        "check_integridade": 206.57
+    },
+    {
+        "status": "Íntegro",
+        "empresa": "EMPRESA 5",
+        "detalhes": {
+            "registros_processados": 25
+        },
+        "total_ativo": 241539175.6,
+        "total_passivo": -241539175.6,
+        "check_integridade": 0.0
+    }
+]

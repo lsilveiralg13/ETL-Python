@@ -1,0 +1,1 @@
+Initial commit: Adiciona primeiros scripts Python e arquivos de dados

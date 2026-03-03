@@ -1,0 +1,13 @@
+dist/
+build/
+IMAGENS/
+*.exe
+*.parquet
+*.xlsx
+*.csv
+*.png
+*.jpg
+*.log
+__pycache__/
+
+desktop.ini

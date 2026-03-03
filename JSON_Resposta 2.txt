@@ -1,0 +1,212 @@
+[
+    {
+        "agenda": {
+            "inicio": "08:00:00.000000",
+            "dia_cod": 1
+        },
+        "docente": "Tavares",
+        "localizacao": {
+            "bloco": "Grandão",
+            "sala_numero": "S1P1"
+        },
+        "detalhes_curso": {
+            "materia": "Física",
+            "turma_sigla": "fis2023011"
+        }
+    },
+    {
+        "agenda": {
+            "inicio": "10:00:00.000000",
+            "dia_cod": 1
+        },
+        "docente": "Tavares",
+        "localizacao": {
+            "bloco": "Grandão",
+            "sala_numero": "S1P1"
+        },
+        "detalhes_curso": {
+            "materia": "Física",
+            "turma_sigla": "fis2023012"
+        }
+    },
+    {
+        "agenda": {
+            "inicio": "13:00:00.000000",
+            "dia_cod": 1
+        },
+        "docente": "Tavares",
+        "localizacao": {
+            "bloco": "Grandão",
+            "sala_numero": "S1P1"
+        },
+        "detalhes_curso": {
+            "materia": "Química",
+            "turma_sigla": "qui2023011"
+        }
+    },
+    {
+        "agenda": {
+            "inicio": "08:00:00.000000",
+            "dia_cod": 1
+        },
+        "docente": "Kânia",
+        "localizacao": {
+            "bloco": "Grandão",
+            "sala_numero": "S2P1"
+        },
+        "detalhes_curso": {
+            "materia": "Química",
+            "turma_sigla": "qui2023012"
+        }
+    },
+    {
+        "agenda": {
+            "inicio": "10:00:00.000000",
+            "dia_cod": 1
+        },
+        "docente": "Kânia",
+        "localizacao": {
+            "bloco": "Grandão",
+            "sala_numero": "S2P1"
+        },
+        "detalhes_curso": {
+            "materia": "Biologia",
+            "turma_sigla": "bio2023011"
+        }
+    },
+    {
+        "agenda": {
+            "inicio": "13:00:00.000000",
+            "dia_cod": 1
+        },
+        "docente": "Kânia",
+        "localizacao": {
+            "bloco": "Grandão",
+            "sala_numero": "S2P1"
+        },
+        "detalhes_curso": {
+            "materia": "Biologia",
+            "turma_sigla": "bio2023012"
+        }
+    },
+    {
+        "agenda": {
+            "inicio": "15:00:00.000000",
+            "dia_cod": 1
+        },
+        "docente": "ZimTom",
+        "localizacao": {
+            "bloco": "Grandão",
+            "sala_numero": "S2P1"
+        },
+        "detalhes_curso": {
+            "materia": "Inglês",
+            "turma_sigla": "ing2023011"
+        }
+    },
+    {
+        "agenda": {
+            "inicio": "08:00:00.000000",
+            "dia_cod": 1
+        },
+        "docente": "ZimTom",
+        "localizacao": {
+            "bloco": "Pequenino",
+            "sala_numero": "S1P2"
+        },
+        "detalhes_curso": {
+            "materia": "Inglês",
+            "turma_sigla": "ing2023012"
+        }
+    },
+    {
+        "agenda": {
+            "inicio": "10:00:00.000000",
+            "dia_cod": 1
+        },
+        "docente": "ZimTom",
+        "localizacao": {
+            "bloco": "Pequenino",
+            "sala_numero": "S1P2"
+        },
+        "detalhes_curso": {
+            "materia": "Português",
+            "turma_sigla": "por2023011"
+        }
+    },
+    {
+        "agenda": {
+            "inicio": "13:00:00.000000",
+            "dia_cod": 1
+        },
+        "docente": "Dóia",
+        "localizacao": {
+            "bloco": "Pequenino",
+            "sala_numero": "S1P2"
+        },
+        "detalhes_curso": {
+            "materia": "Português",
+            "turma_sigla": "por2023012"
+        }
+    },
+    {
+        "agenda": {
+            "inicio": "15:00:00.000000",
+            "dia_cod": 1
+        },
+        "docente": "Dóia",
+        "localizacao": {
+            "bloco": "Pequenino",
+            "sala_numero": "S1P2"
+        },
+        "detalhes_curso": {
+            "materia": "Grego",
+            "turma_sigla": "gre2023011"
+        }
+    },
+    {
+        "agenda": {
+            "inicio": "08:00:00.000000",
+            "dia_cod": 1
+        },
+        "docente": "Dóia",
+        "localizacao": {
+            "bloco": "Pequenino",
+            "sala_numero": "S2P2"
+        },
+        "detalhes_curso": {
+            "materia": "Grego",
+            "turma_sigla": "gre2023012"
+        }
+    },
+    {
+        "agenda": {
+            "inicio": "10:00:00.000000",
+            "dia_cod": 1
+        },
+        "docente": "Podôd",
+        "localizacao": {
+            "bloco": "Pequenino",
+            "sala_numero": "S2P2"
+        },
+        "detalhes_curso": {
+            "materia": "DCE",
+            "turma_sigla": "vag2023011"
+        }
+    },
+    {
+        "agenda": {
+            "inicio": "13:00:00.000000",
+            "dia_cod": 1
+        },
+        "docente": "Podôd",
+        "localizacao": {
+            "bloco": "Pequenino",
+            "sala_numero": "S2P2"
+        },
+        "detalhes_curso": {
+            "materia": "DCE",
+            "turma_sigla": "vag2023012"
+        }
+    }
+]
