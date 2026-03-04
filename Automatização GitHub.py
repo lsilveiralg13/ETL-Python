@@ -34,7 +34,8 @@ class OrionGitPro:
 
         trash_list = [
             os.path.join(git_dir, 'index.lock'),
-            os.path.join(git_dir, 'refs/heads/main.lock')
+            os.path.join(git_dir, 'refs/heads/main.lock'),
+            os.path.join(git_dir, 'refs/heads/master.lock')
         ]
 
         for item in trash_list:
@@ -96,36 +97,36 @@ class OrionGitPro:
                 f.write(f"\n\n---\n**Última Sincronização:** {now} | **Procedures:** {total_procs}\n")
 
     def execute_flow(self, commit_type="feat", message="sync automatico"):
-        """Ciclo completo de automação com verificações de confirmação."""
+        """Ciclo completo de automação com correção de upstream."""
         try:
             total = self.backup_procedures()
-            if total == 0: 
-                print("⚠️ Nenhuma procedure encontrada para backup.")
-                return
+            if total == 0: return
 
             self.update_readme_stats(total)
 
-            # Adiciona arquivos e verifica mudanças
+            # Detecta branch atual (main ou master)
+            current_branch = self.repo.active_branch.name
+            
             self.repo.git.add(all=True)
             
             if self.repo.is_dirty(untracked_files=True):
                 full_msg = f"{commit_type}: {message} ({total} procs)"
-                
-                # REALIZA O COMMIT E PEGA O OBJETO DO COMMIT
                 novo_commit = self.repo.index.commit(full_msg)
                 print(f"✅ Commit local gerado: [{novo_commit.hexsha[:7]}]")
                 
-                print(f"🚀 Enviando para o servidor remoto...")
-                # Tenta fazer o push e capturar confirmação
-                origem = self.repo.remote(name='origin')
-                push_info = origem.push()
+                print(f"🚀 Enviando para o servidor remoto (Branch: {current_branch})...")
                 
-                # Verifica se o push foi aceito pelo servidor
+                # AJUSTE AQUI: Define o upstream explicitamente no push
+                origem = self.repo.remote(name='origin')
+                push_info = origem.push(refspec=f'{current_branch}:{current_branch}', set_upstream=True)
+                
                 if push_info[0].flags & git.remote.PushInfo.ERROR:
                     print(f"❌ Erro no Push: {push_info[0].summary}")
                 else:
-                    print(f"✨ SUCESSO! Base de commits atualizada.")
-                    print(f"🔗 Link do commit: {origem.url.replace('.git', '')}/commit/{novo_commit.hexsha}")
+                    print(f"✨ SUCESSO! Base de commits atualizada no GitHub.")
+                    # Tenta gerar o link amigável
+                    base_url = origem.url.replace('.git', '').replace('git@github.com:', 'https://github.com/')
+                    print(f"🔗 Link: {base_url}/commit/{novo_commit.hexsha}")
             else:
                 print("✨ Nenhuma mudança detectada. O repositório já está atualizado.")
 
