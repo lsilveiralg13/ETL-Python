@@ -159,3 +159,4 @@ if __name__ == "__main__":
     elif op == "3": f['ESTADO_IS'] = input("Vendedora: ")
     
     consolidar_relatorio(f, top)
+    
