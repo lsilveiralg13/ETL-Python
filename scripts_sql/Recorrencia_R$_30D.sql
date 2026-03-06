@@ -1,17 +1,26 @@
-CREATE DEFINER=`root`@`localhost` PROCEDURE `Recorrencia_R$_30D`()
+CREATE DEFINER=`root`@`localhost` PROCEDURE `Recorrencia_R$_30D`(
+    IN p_mes INT, -- Parâmetro de Mês (Ex: 2)
+    IN p_ano INT  -- Parâmetro de Ano (Ex: 2026)
+)
 BEGIN
-    -- 1. Definindo qual mês exibir (Fallback Inteligente)
-    SET @mes_alvo = MONTH(CURDATE());
-    SET @ano_alvo = YEAR(CURDATE());
+    DECLARE v_mes_alvo INT;
+    DECLARE v_ano_alvo INT;
 
-    -- Se não houver faturamento no mês atual, retroage 1 mês
+    -- 1. LÓGICA DE DEFINIÇÃO DO PERÍODO (Fallback Inteligente)
+    -- Se os parâmetros forem passados, usa eles. Se forem NULL, usa a data atual.
+    SET v_mes_alvo = COALESCE(p_mes, MONTH(CURDATE()));
+    SET v_ano_alvo = COALESCE(p_ano, YEAR(CURDATE()));
+
+    -- Se não houver faturamento no período definido, retroage 1 mês automaticamente
     IF (SELECT COUNT(*) FROM staging_faturamento_multimarcas 
-        WHERE MONTH(data_negociacao) = @mes_alvo AND YEAR(data_negociacao) = @ano_alvo) = 0 THEN
-        SET @mes_alvo = MONTH(CURDATE() - INTERVAL 1 MONTH);
-        SET @ano_alvo = YEAR(CURDATE() - INTERVAL 1 MONTH);
+        WHERE MONTH(data_negociacao) = v_mes_alvo AND YEAR(data_negociacao) = v_ano_alvo) = 0 
+        AND p_mes IS NULL THEN -- Só retroage se o usuário não forçou um mês específico
+        
+        SET v_mes_alvo = MONTH(CURDATE() - INTERVAL 1 MONTH);
+        SET v_ano_alvo = YEAR(CURDATE() - INTERVAL 1 MONTH);
     END IF;
 
-    -- 2. Execução da Query com o mês definido acima
+    -- 2. EXECUÇÃO DA QUERY
     SELECT vendedor, `0`, `1`, `2`, `>=3`, Total
     FROM (
         WITH base_calculo AS (
@@ -22,8 +31,8 @@ BEGIN
             FROM staging_faturamento_multimarcas sfm
             INNER JOIN staging_recorrencia_multimarcas srm ON sfm.codigo_parceiro = srm.codigo_parceiro
             WHERE sfm.status_nfe = 'Aprovada'
-              AND MONTH(sfm.data_negociacao) = @mes_alvo
-              AND YEAR(sfm.data_negociacao) = @ano_alvo
+              AND MONTH(sfm.data_negociacao) = v_mes_alvo
+              AND YEAR(sfm.data_negociacao) = v_ano_alvo
               AND srm.vendedor NOT IN ('ALEX SANDRO', 'MARCELAVAZ')
         ),
         consolidado AS (
@@ -51,7 +60,7 @@ BEGIN
         UNION ALL
         
         SELECT
-            CONCAT('---TOTAL EQUIPE (MÊS ', @mes_alvo, ')---'),
+            CONCAT('---TOTAL EQUIPE (MÊS ', v_mes_alvo, '/', v_ano_alvo, ')---'),
             CONCAT('R$ ', FORMAT(IFNULL(SUM(v0),0), 2, 'de_DE')),
             CONCAT('R$ ', FORMAT(IFNULL(SUM(v1),0), 2, 'de_DE')),
             CONCAT('R$ ', FORMAT(IFNULL(SUM(v2),0), 2, 'de_DE')),
