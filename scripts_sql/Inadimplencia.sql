@@ -15,14 +15,14 @@ WITH cte_ativos AS (
 cte_inadimplencia AS (
     SELECT 
         vendedor,
-        SUM(total_em_aberto) AS valor_num,
+        SUM(valor_inadimplente) AS valor_num,
         COUNT(DISTINCT codigo_parceiro) AS qtd_num
     FROM staging_financeiro_multimarcas
     WHERE base_ativos = 'BASE ATIVA'
       AND status_vendedor = 'VENDEDOR ATIVO'
       AND vendedor NOT IN ('ALEX SANDRO', 'MARCELAVAZ', '<SEM VENDEDOR>')
-      AND maior_atraso BETWEEN 1 AND 31
-      AND inadimplente = 'S'
+      AND atraso_dias BETWEEN 1 AND 31
+      AND inadimplentes = 'S'
     GROUP BY vendedor
 )
 SELECT 
@@ -63,8 +63,8 @@ FROM (
     WHERE base_ativos = 'BASE ATIVA'
       AND status_vendedor = 'VENDEDOR ATIVO'
       AND vendedor NOT IN ('ALEX SANDRO', 'MARCELAVAZ', '<SEM VENDEDOR>')
-      AND maior_atraso BETWEEN 1 AND 31
-      AND inadimplente = 'S'
+      AND atraso_dias BETWEEN 1 AND 31
+      AND inadimplentes = 'S'
 ) AS resultado_final
 ORDER BY ordem ASC, perc_ordenacao DESC;
 

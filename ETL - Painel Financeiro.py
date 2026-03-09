@@ -1,8 +1,8 @@
 import pandas as pd
 from sqlalchemy import create_engine
-from sqlalchemy.types import Integer, DateTime, String, Numeric, Text
+from sqlalchemy.types import Integer, DateTime, String, Numeric
 from sqlalchemy.schema import Table, Column, MetaData, CreateTable
-from datetime import datetime
+import pymysql
 
 # --- Seção 1: Configurações ---
 EXCEL_FILE = "PAINEL FINANCEIRO.xlsx"
@@ -15,7 +15,7 @@ DB_PORT = 3306
 DB_NAME = 'faturamento_multimarcas_dw'
 STAGING_TABLE_NAME = 'staging_financeiro_multimarcas'
 
-# Mapeamento atualizado conforme sua solicitação (13 colunas + timestamp)
+# Mapeamento: Apenas colunas que EXISTEM no Excel
 COLUMN_MAPPING_AND_TYPES = {
     'Loja': {'new_name': 'loja', 'type': String(100)},
     'Código': {'new_name': 'codigo_parceiro', 'type': Integer},
@@ -27,6 +27,9 @@ COLUMN_MAPPING_AND_TYPES = {
     'Total em Aberto': {'new_name': 'total_em_aberto', 'type': Numeric(15, 2)},
     'Inadimplente': {'new_name': 'inadimplente', 'type': String(10)},
     'Dt. Cadastro': {'new_name': 'data_cadastro', 'type': DateTime},
+    'Valor (R$) Inadim.': {'new_name': 'valor_inadimplente', 'type': Numeric(15, 2)},
+    'Atraso em Dias': {'new_name': 'atraso_dias', 'type': Integer},
+    'INADIMPLENTES': {'new_name': 'inadimplentes', 'type': String(10)},
     'MÊS': {'new_name': 'mes', 'type': String(20)},
     'ANO': {'new_name': 'ano', 'type': Numeric(15, 2)},
     'RÉGUA CADASTRO': {'new_name': 'regua_cadastro', 'type': String(50)},
@@ -34,42 +37,42 @@ COLUMN_MAPPING_AND_TYPES = {
     'status_vendedor': {'new_name': 'status_vendedor', 'type': String(50)},
     'STATUS': {'new_name': 'status', 'type': String(50)},
     'BASE DE ATIVOS': {'new_name': 'base_ativos', 'type': String(50)},
-    'Maior Atraso Pgto': {'new_name': 'maior_atraso', 'type': Numeric(15, 2)},
-    'data_carga_dw': {'new_name': 'data_carga_dw', 'type': DateTime}
+    'Maior Atraso Pgto': {'new_name': 'maior_atraso', 'type': Numeric(15, 2)}
 }
 
 # --- Seção 2: Pipeline ETL ---
 
 def run_etl():
-    df = None
     connection = None
     cursor = None
 
     try:
-        print(f"--- Iniciando ETL de Parceiros para o Data Warehouse ---")
+        print(f"--- Iniciando ETL para o Data Warehouse ---")
 
         # 1. Extração
         df_raw = pd.read_excel(EXCEL_FILE, sheet_name=EXCEL_SHEET_NAME)
-        df = df_raw.copy()
-
+        
+        # 2. Transformação
         print("\n2. Iniciando transformações...")
 
-        # 2.1 Seleção e renomeação
-        # Filtramos apenas as colunas que você listou como desejadas
-        columns_to_select = {excel_col: config['new_name'] for excel_col, config in COLUMN_MAPPING_AND_TYPES.items() if excel_col in df.columns}
+        # 2.1 Seleção apenas das colunas que existem no Excel e no mapeamento
+        valid_cols = [col for col in COLUMN_MAPPING_AND_TYPES.keys() if col in df_raw.columns]
+        df = df_raw[valid_cols].copy()
         
-        df = df[list(columns_to_select.keys())].rename(columns=columns_to_select)
+        # Renomeação
+        rename_dict = {k: v['new_name'] for k, v in COLUMN_MAPPING_AND_TYPES.items()}
+        df = df.rename(columns=rename_dict)
 
-        # 2.2 Conversão de tipos
+        # 2.2 Conversão de tipos e limpeza
         if 'data_cadastro' in df.columns:
             df['data_cadastro'] = pd.to_datetime(df['data_cadastro'], errors='coerce')
         
-        numeric_cols = ['limite_total', 'limite_disponivel', 'total_em_aberto']
+        numeric_cols = ['limite_total', 'limite_disponivel', 'total_em_aberto', 'valor_inadimplente', 'maior_atraso', 'ano']
         for col in numeric_cols:
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
 
-        # 2.3 Timestamp de carga
+        # 2.3 Adição da coluna de controle (Timestamp) após o filtro do Excel
         df['data_carga_dw'] = pd.Timestamp.now()
 
         # 3. Carga para MySQL
@@ -78,23 +81,37 @@ def run_etl():
         connection = engine.raw_connection()
         cursor = connection.cursor()
 
-        # DROP e CREATE TABLE
+        # DROP TABLE
         cursor.execute(f"DROP TABLE IF EXISTS `{STAGING_TABLE_NAME}`;")
         
+        # 4. Criação dinâmica da tabela baseada nas colunas REAIS do DataFrame final
         metadata = MetaData()
-        table_columns = [Column(config['new_name'], config['type'], nullable=True) for config in COLUMN_MAPPING_AND_TYPES.values()]
+        table_columns = []
+        
+        for col_name in df.columns:
+            # Busca o tipo no dicionário original ou define como DateTime para a coluna de carga
+            if col_name == 'data_carga_dw':
+                col_type = DateTime
+            else:
+                # Localiza o tipo original pelo novo nome
+                col_type = next((v['type'] for k, v in COLUMN_MAPPING_AND_TYPES.items() if v['new_name'] == col_name), String(255))
+            
+            table_columns.append(Column(col_name, col_type, nullable=True))
+
         table_obj = Table(STAGING_TABLE_NAME, metadata, *table_columns, mysql_engine='InnoDB', mysql_charset='utf8mb4')
         
+        # Executa o Create Table
         create_table_sql = str(CreateTable(table_obj).compile(engine))
         cursor.execute(create_table_sql)
         
-        # Inserção
-        column_order = list(df.columns)
-        columns_sql = ", ".join([f"`{col}`" for col in column_order])
-        placeholders = ", ".join(["%s"] * len(column_order))
+        # 5. Inserção
+        columns_sql = ", ".join([f"`{col}`" for col in df.columns])
+        placeholders = ", ".join(["%s"] * len(df.columns))
         insert_sql = f"INSERT INTO `{STAGING_TABLE_NAME}` ({columns_sql}) VALUES ({placeholders})"
 
-        data_to_insert = [tuple(x) for x in df.to_numpy()]
+        # Converte NaT/NaN para None (que o MySQL entende como NULL)
+        data_to_insert = df.where(pd.notnull(df), None).values.tolist()
+        data_to_insert = [tuple(x) for x in data_to_insert]
         
         cursor.executemany(insert_sql, data_to_insert)
         connection.commit()
