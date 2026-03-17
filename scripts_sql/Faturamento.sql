@@ -1,87 +1,177 @@
 CREATE DEFINER=`root`@`localhost` PROCEDURE `Faturamento`(
-    IN p_chave_mes VARCHAR(20),
-    IN p_chave_ano INT,
-    IN p_tipo_venda VARCHAR(30)
+    IN p_mes_nome VARCHAR(20),     -- ex: 'NOVEMBRO'
+    IN p_ano      INT              -- ex: 2025
 )
 BEGIN
-    -- 1. QUERY PRINCIPAL UNIFICADA
-    WITH metas_validas AS (
-        SELECT 
-            TRIM(UPPER(vendedor)) AS vendedor_join,
-            vendedor AS vendedor_original,
-            CASE 
-                WHEN UPPER(p_tipo_venda) IN ('TODOS', 'TODAS') THEN COALESCE(meta_valor, 0)
-                WHEN UPPER(p_tipo_venda) = 'PRONTA ENTREGA' THEN COALESCE(meta_prontaentrega, 0)
-                WHEN UPPER(p_tipo_venda) = 'SHOWROOM' THEN COALESCE(meta_showroom, 0)
-                ELSE COALESCE(meta_valor, 0) 
-            END AS valor_meta
-        FROM metas_vendedoras
-        WHERE chave_mes = p_chave_mes 
-          AND chave_ano = p_chave_ano
-          AND vendedor <> 'ALEX SANDRO'
-          AND vendedor IS NOT NULL AND TRIM(vendedor) <> ''
-    ),
-    metas_com_valor AS (
-        -- Filtra vendedoras com meta > 0 (Remove André no Showroom)
-        SELECT 
-            *,
-            -- Calcula a soma de todas as metas válidas do período para usar no Total Geral
-            SUM(valor_meta) OVER() AS meta_total_periodo 
-        FROM metas_validas 
-        WHERE valor_meta > 0
-    ),
-    faturamento_agrupado AS (
-        SELECT 
-            TRIM(UPPER(vendedor)) AS vendedor_join,
-            SUM(valor_faturado) AS total_faturado,
-            SUM(qtd_itens) AS total_itens,
-            COUNT(DISTINCT nome_parceiro) AS total_conversao
-        FROM staging_faturamento_multimarcas
-        WHERE chave_mes = p_chave_mes 
-          AND chave_ano = p_chave_ano
-          AND vendedor <> 'ALEX SANDRO'
-          AND (
-               UPPER(p_tipo_venda) IN ('TODOS', 'TODAS') 
-               OR (UPPER(p_tipo_venda) = 'SHOWROOM' AND tipo_venda = 'SHOWROOM')
-               OR (UPPER(p_tipo_venda) = 'PRONTA ENTREGA' AND tipo_venda = 'PRONTA ENTREGA')
-          )
-        GROUP BY TRIM(UPPER(vendedor))
-    )
-    SELECT
-        p_chave_mes AS chave_mes,
-        p_chave_ano AS chave_ano,
-        -- Identifica a linha do ROLLUP e define como "Total Geral"
-        IF(GROUPING(m.vendedor_join) = 1, 'Total Geral', MAX(m.vendedor_original)) AS vendedor,
+    DECLARE v_mes_num TINYINT;
 
-        -- Exibe a meta individual ou a soma total (deve bater os 1.613.528,00)
-        CONCAT('R$ ', FORMAT(
-            IF(GROUPING(m.vendedor_join) = 1, MAX(m.meta_total_periodo), MAX(m.valor_meta))
-        , 2, 'de_DE')) AS meta_vendedor,
+    -- normaliza o mês para maiúsculo
+    SET p_mes_nome = UPPER(p_mes_nome);
 
-        CONCAT('R$ ', FORMAT(SUM(COALESCE(fa.total_faturado, 0)), 2, 'de_DE')) AS Faturado,
-        
-        CONCAT('R$ ', FORMAT(
-            GREATEST(IF(GROUPING(m.vendedor_join) = 1, MAX(m.meta_total_periodo), MAX(m.valor_meta)) - SUM(COALESCE(fa.total_faturado, 0)), 0)
-        , 2, 'de_DE')) AS `GAP (R$)`,
+    -- converte nome do mês em número (1–12)
+    SET v_mes_num = CASE p_mes_nome
+        WHEN 'JANEIRO'   THEN 1
+        WHEN 'FEVEREIRO' THEN 2
+        WHEN 'MARÇO'     THEN 3
+        WHEN 'MARCO'     THEN 3
+        WHEN 'ABRIL'     THEN 4
+        WHEN 'MAIO'      THEN 5
+        WHEN 'JUNHO'     THEN 6
+        WHEN 'JULHO'     THEN 7
+        WHEN 'AGOSTO'    THEN 8
+        WHEN 'SETEMBRO'  THEN 9
+        WHEN 'OUTUBRO'   THEN 10
+        WHEN 'NOVEMBRO'  THEN 11
+        WHEN 'DEZEMBRO'  THEN 12
+        ELSE NULL
+    END;
 
-        SUM(COALESCE(fa.total_itens, 0)) AS Itens,
-        SUM(COALESCE(fa.total_conversao, 0)) AS Conversao,
-        
-        CONCAT(IFNULL(FORMAT(
-            (SUM(COALESCE(fa.total_faturado, 0)) / NULLIF(
-                IF(GROUPING(m.vendedor_join) = 1, MAX(m.meta_total_periodo), MAX(m.valor_meta))
-            , 0)) * 100
-        , 2), '0,00'), '%') AS Atingimento,
+    IF v_mes_num IS NULL THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'Nome de mês inválido. Use JANEIRO, FEVEREIRO, ... DEZEMBRO.';
+    END IF;
 
-        IF(GROUPING(m.vendedor_join) = 1,
-            IF(SUM(COALESCE(fa.total_faturado, 0)) >= MAX(m.meta_total_periodo), 'BATEU META', 'FORA DA META'),
-            IF(SUM(COALESCE(fa.total_faturado, 0)) >= MAX(m.valor_meta), 'BATEU META', 'FORA DA META')
-        ) AS StatusMeta
-
-    FROM metas_com_valor m
-    LEFT JOIN faturamento_agrupado fa ON m.vendedor_join = fa.vendedor_join
+    /*
+      v = vendas por vendedor no mês/ano escolhido
+      cad = carteira (ativos + bloqueados) por vendedor
+      m = metas do mês/ano
+    */
     
-    GROUP BY m.vendedor_join WITH ROLLUP
-    ORDER BY GROUPING(m.vendedor_join) ASC, SUM(COALESCE(fa.total_faturado, 0)) DESC;
+    -- NOVO SELECT COM ROLLUP PARA TOTAIS GERAIS
+    SELECT
+        -- Nome Vendedor: Usa 'SOMA' se for a linha de total
+        IFNULL(Resumo.Vendedor, 'SOMA') AS `Nome Vendedor`,
 
+        -- META por Inside Sales (SOMA)
+        REPLACE(
+            REPLACE(
+                REPLACE(FORMAT(SUM(Resumo.Meta_IS), 2), ',', 'X'), -- Usa o campo numérico Meta_IS
+                '.',
+                ','
+            ),
+            'X',
+            '.'
+        ) AS `Meta por I.S`,
+
+        -- FATURAMENTO (SOMA)
+        REPLACE(
+            REPLACE(
+                REPLACE(FORMAT(SUM(Resumo.Faturamento), 2), ',', 'X'), -- Usa o campo numérico Faturamento
+                '.',
+                ','
+            ),
+            'X',
+            '.'
+        ) AS `Faturamento`,
+
+        -- ATINGIMENTO (%) - Recalculado (Soma Faturamento / Soma Meta)
+        CONCAT(
+            REPLACE(
+                REPLACE(
+                    REPLACE(
+                        FORMAT(
+                            (SUM(Resumo.Faturamento) / NULLIF(SUM(Resumo.Meta_IS), 0)) * 100,
+                            2
+                        ),
+                        ',',
+                        'X'
+                    ),
+                    '.',
+                    ','
+                ),
+                'X',
+                '.'
+            ),
+            ' %'
+        ) AS `Atingimento (%)`,
+
+        -- CONVERSÕES (SOMA)
+        SUM(Resumo.Convertidos) AS `Conversões`,
+
+        -- BASE DE ATIVOS (SOMA)
+        SUM(Resumo.Carteira) AS `Base de Ativos`,
+
+        -- TAXA DE CONVERSÃO (%) - Recalculada (Soma Convertidos / Soma Base)
+        CONCAT(
+            REPLACE(
+                REPLACE(
+                    REPLACE(
+                        FORMAT(
+                            (SUM(Resumo.Convertidos) / NULLIF(SUM(Resumo.Carteira), 0)) * 100,
+                            2
+                        ),
+                        ',',
+                        'X'
+                    ),
+                    '.',
+                    ','
+                ),
+                'X',
+                '.'
+            ),
+            ' %'
+        ) AS `Taxa de Conversão (%)`,
+        
+        -- TICKET MÉDIO - Recalculado (Soma Faturamento / Soma Convertidos)
+        REPLACE(
+            REPLACE(
+                REPLACE(
+                    FORMAT(
+                        SUM(Resumo.Faturamento) / NULLIF(SUM(Resumo.Convertidos), 0),
+                        2
+                    ),
+                    ',',
+                    'X'
+                ),
+                '.',
+                ','
+            ),
+            'X',
+            '.'
+        ) AS `Ticket Médio`
+        
+    FROM (
+        -- SELECT ORIGINAL (COM NOMES DE COLUNAS SIMPLES E SEM FORMATAÇÃO PT-BR)
+        SELECT
+            v.Vendedor AS Vendedor, -- Nome simples para referência no SELECT externo
+            m.`Meta por Inside Sales` AS Meta_IS, -- Nome simples para referência
+            v.Faturamento,
+            v.Convertidos,
+            cad.Carteira
+        FROM (
+            -- Faturamento e convertidos por vendedor no mês
+            SELECT
+                COALESCE(f.`Apelido (Vendedor)`, f.`Vendedor`) AS Vendedor,
+                SUM(f.`Vlr. Nota`)                                 AS Faturamento,
+                COUNT(DISTINCT f.`Parceiro`)                       AS Convertidos
+            FROM fato_base_de_dados AS f
+            WHERE
+                f.`Chave_Ano` = p_ano
+                AND UPPER(f.`Chave_Mes`) = p_mes_nome
+            GROUP BY
+                COALESCE(f.`Apelido (Vendedor)`, f.`Vendedor`)
+        ) AS v
+        LEFT JOIN (
+            -- Carteira: clientes ATIVO + BLOQUEADO por vendedor
+            SELECT
+                c.`Apelido (Vendedor)`      AS Vendedor,
+                COUNT(DISTINCT c.`Cód. Parceiro`) AS Carteira
+            FROM dim_cadastro AS c
+            WHERE UPPER(c.`Status`) IN ('Loja Ativa','Loja Bloqueada')
+            GROUP BY
+                c.`Apelido (Vendedor)`
+        ) AS cad
+            ON cad.Vendedor = v.Vendedor
+        LEFT JOIN dim_metas AS m
+            ON m.Ano = p_ano
+           AND m.Mes = v_mes_num
+    ) AS Resumo
+    
+    GROUP BY
+        Resumo.Vendedor WITH ROLLUP -- Aplica ROLLUP ao nome simples da coluna
+    
+    ORDER BY
+        FIELD(IFNULL(Resumo.Vendedor, 'SOMA'), 'SOMA'), -- Garante que 'SOMA' fique no final
+        SUM(Resumo.Faturamento) DESC;
+        
 END;
