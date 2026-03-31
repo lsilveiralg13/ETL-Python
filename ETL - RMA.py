@@ -6,7 +6,7 @@ from sqlalchemy.types import Integer, String, DateTime, Text
 from sqlalchemy.schema import Table, Column, MetaData
 
 # --- Seção 1: Configurações de Caminho ---
-EXCEL_FILE_PATH = r"C:\Users\lucas.barros\OneDrive - BELMICRO TECNOLOGIA SA\Área de Trabalho\Scripts Python\REPAROS RMA ETL.xlsx"
+EXCEL_FILE_PATH = r"C:\Users\lucas.barros\OneDrive - BELMICRO TECNOLOGIA SA\Área de Trabalho\Scripts Python\REPARO PLACAS ETL.xlsx"
 EXCEL_SHEET_NAME = "BASE"
 
 # --- Seção 2: Configurações de Banco ---
