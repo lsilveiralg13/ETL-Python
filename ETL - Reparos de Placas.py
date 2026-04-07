@@ -17,7 +17,7 @@ DB_PORT = 3306
 DB_NAME = 'belmicro'
 STAGING_TABLE_NAME = 'staging_reparos'
 
-# --- Seção 3: Mapeamento de Colunas (Atualizado com as Chaves) ---
+# --- Seção 3: Mapeamento de Colunas ---
 COLUMN_MAPPING_AND_TYPES = {
     'ORIGEM': {'new_name': 'origem', 'type': String(50)},
     'SÉRIE': {'new_name': 'num_serie', 'type': String(100)},
@@ -55,7 +55,7 @@ def run_etl_reparos():
         # 1. Leitura
         df = pd.read_excel(EXCEL_FILE_PATH, sheet_name=EXCEL_SHEET_NAME)
         
-        # 2. Filtro e Renomeação (Garante que as chaves entrem no DataFrame)
+        # 2. Filtro e Renomeação
         cols_presentes = [c for c in COLUMN_MAPPING_AND_TYPES.keys() if c in df.columns]
         df = df[cols_presentes].rename(columns={k: v['new_name'] for k, v in COLUMN_MAPPING_AND_TYPES.items()})
 
@@ -69,21 +69,30 @@ def run_etl_reparos():
         engine = create_engine(f"mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}")
         metadata = MetaData()
         
-        # Define colunas fisicamente para o SQL
-        table_columns = [Column(v['new_name'], v['type']) for v in COLUMN_MAPPING_AND_TYPES.values()]
+        # --- ALTERAÇÃO AQUI: Criamos a coluna ID explicitamente como PK e AutoIncrement ---
+        table_columns = [
+            Column('id', Integer, primary_key=True, autoincrement=True) 
+        ]
+        
+        # Adiciona as outras colunas do mapeamento
+        for v in COLUMN_MAPPING_AND_TYPES.values():
+            table_columns.append(Column(v['new_name'], v['type']))
+        
         table_columns.append(Column('data_carga_dw', DateTime))
         
         with engine.begin() as conn:
             conn.execute(text(f"DROP TABLE IF EXISTS {STAGING_TABLE_NAME}"))
             
-            # Cria a tabela garantindo que chave_mes e chave_ano existam
+            # Cria a tabela com a estrutura que definimos (incluindo o ID)
             staging_table = Table(STAGING_TABLE_NAME, metadata, *table_columns)
             staging_table.create(conn)
             
+            # O Pandas ignora o ID porque ele não existe no DataFrame 'df'
+            # O MySQL gerará o ID automaticamente no 'append'
             df.to_sql(STAGING_TABLE_NAME, conn, if_exists='append', index=False)
             auditoria_simples(df)
 
-        print(f"✅ CARGA CONCLUÍDA: {STAGING_TABLE_NAME} está atualizada.")
+        print(f"✅ CARGA CONCLUÍDA: {STAGING_TABLE_NAME} criada com ID Auto-Increment.")
 
     except Exception as e:
         print(f"❌ ERRO: {e}")

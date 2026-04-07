@@ -1,5 +1,6 @@
 import pandas as pd
 import numpy as np
+import os
 from sqlalchemy import create_engine, text
 from sqlalchemy.types import Integer, DateTime, String, Numeric, Text
 from sqlalchemy.schema import Table, Column, MetaData
@@ -8,6 +9,7 @@ from sqlalchemy.schema import Table, Column, MetaData
 EXCEL_FILE = "TELECONTROL ETL.xlsx"
 EXCEL_SHEET_NAME = "BASE"
 
+# --- Seção 2: Configurações de Banco ---
 DB_USER = 'root'
 DB_PASSWORD = 'root'
 DB_HOST = 'localhost'
@@ -15,7 +17,7 @@ DB_PORT = 3306
 DB_NAME = 'belmicro'
 STAGING_TABLE_NAME = 'staging_telecontrol'
 
-# Mapeamento Completo
+# --- Seção 3: Mapeamento Completo ---
 COLUMN_MAPPING_AND_TYPES = {
     'Numero_OS': {'new_name': 'numero_os', 'type': String(50)},
     'Status': {'new_name': 'status', 'type': String(50)},
@@ -45,14 +47,10 @@ COLUMN_MAPPING_AND_TYPES = {
 }
 
 def auditoria_e_insights(df):
-    """
-    Realiza uma varredura nos dados carregados para apoiar a validação do Analista.
-    """
     print("\n" + "🔍" + " —" * 25)
     print("RESUMO DE AUDITORIA E INSIGHTS PARA VALIDAÇÃO")
     print("— " * 26)
 
-    # 1. Qualidade dos Dados
     print(f"\n📌 CHECK-UP DE QUALIDADE:")
     print(f"- Registros Extraídos: {len(df)}")
     print(f"- OS sem Fornecedor (NULL): {df['fornecedor'].isna().sum()}")
@@ -61,29 +59,29 @@ def auditoria_e_insights(df):
         sla_negativo = len(df[df['dias_finalizacao'] < 0])
         print(f"- OS com SLA Negativo: {sla_negativo} {'⚠️ (Verificar datas no Excel)' if sla_negativo > 0 else '✅'}")
 
-    # 2. Sugestões de KPIs para suas Views
     print(f"\n📈 INSIGHTS E SUGESTÕES DE VIEW:")
     
     if 'status' in df.columns:
         status_counts = df['status'].value_counts()
-        print(f"- Status Predominante: {status_counts.idxmax()} ({status_counts.max()} registros)")
-
-    if 'fornecedor' in df.columns and 'dias_finalizacao' in df.columns:
-        media_geral = df[df['status'].str.contains('Finaliza', case=False, na=False)]['dias_finalizacao'].mean()
-        print(f"- SLA Médio Geral (Finalizadas): {media_geral:.1f} dias")
-        print(f"💡 DICA: Crie sua View de SLA agrupando por 'fornecedor' e filtrando 'fornecedor IS NOT NULL'.")
+        if not status_counts.empty:
+            print(f"- Status Predominante: {status_counts.idxmax()} ({status_counts.max()} registros)")
 
     if 'linha_produto' in df.columns:
-        top_linha = df['linha_produto'].value_counts().idxmax()
-        print(f"- Linha com Maior Volume: {top_linha}")
+        if not df['linha_produto'].dropna().empty:
+            top_linha = df['linha_produto'].value_counts().idxmax()
+            print(f"- Linha com Maior Volume: {top_linha}")
 
     print("\n" + "— " * 30 + "🚀")
 
 def run_etl():
     try:
-        print(f"--- Iniciando ETL: Schema {DB_NAME} ---")
+        print(f"--- Iniciando ETL Telecontrol: {DB_NAME} ---")
 
         # 1. Extração
+        if not os.path.exists(EXCEL_FILE):
+            print(f"❌ Arquivo não encontrado: {EXCEL_FILE}")
+            return
+            
         df = pd.read_excel(EXCEL_FILE, sheet_name=EXCEL_SHEET_NAME)
         print(f"✅ Extração concluída: {len(df)} linhas encontradas.")
 
@@ -91,45 +89,47 @@ def run_etl():
         existing_cols = {k: v['new_name'] for k, v in COLUMN_MAPPING_AND_TYPES.items() if k in df.columns}
         df = df[list(existing_cols.keys())].rename(columns=existing_cols)
 
-        # 2.2 Conversão de Datas
         date_cols = ['data_abertura', 'data_finalizacao', 'data_conserto', 'data_compra']
         for col in date_cols:
             if col in df.columns:
                 df[col] = pd.to_datetime(df[col], errors='coerce')
 
-        # 2.3 Cálculo de Dias
         if 'data_finalizacao' in df.columns and 'data_abertura' in df.columns:
-            print("⚙️ Calculando DIAS_FINALIZAÇÃO...")
             df['dias_finalizacao'] = (df['data_finalizacao'] - df['data_abertura']).dt.days
             df['dias_finalizacao'] = df['dias_finalizacao'].fillna(0).astype(int)
 
-        # 2.4 Coluna de Auditoria
         df['data_carga_dw'] = pd.Timestamp.now()
 
-        # 3. Carga (MySQL)
+        # 3. Conexão e Carga
         mysql_url = f"mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
         engine = create_engine(mysql_url)
-        
         metadata = MetaData()
-        table_columns = [Column(v['new_name'], v['type']) for v in COLUMN_MAPPING_AND_TYPES.values()]
-        table_columns.append(Column('data_carga_dw', DateTime))
         
-        table_obj = Table(STAGING_TABLE_NAME, metadata, *table_columns)
+        # --- ESTRUTURA COM PRIMARY KEY E AUTO-INCREMENT ---
+        table_columns = [
+            Column('id', Integer, primary_key=True, autoincrement=True)
+        ]
+        
+        for v in COLUMN_MAPPING_AND_TYPES.values():
+            table_columns.append(Column(v['new_name'], v['type']))
+        
+        table_columns.append(Column('data_carga_dw', DateTime))
         
         with engine.begin() as conn:
             print(f"🗑️ Removendo tabela antiga: {STAGING_TABLE_NAME}")
             conn.execute(text(f"DROP TABLE IF EXISTS {STAGING_TABLE_NAME}"))
             
-            print(f"🔨 Criando nova estrutura de tabela...")
-            metadata.create_all(conn)
+            print(f"🔨 Criando nova estrutura com ID PK...")
+            staging_table = Table(STAGING_TABLE_NAME, metadata, *table_columns)
+            staging_table.create(conn)
             
-            print(f"📤 Carregando dados para o MySQL...")
+            print(f"📤 Carregando dados...")
+            # index=False garante que o ID seja gerado pelo MySQL, não pelo Pandas
             df.to_sql(STAGING_TABLE_NAME, conn, if_exists='append', index=False)
             
-            # --- Executa o Complemento de Auditoria ---
             auditoria_e_insights(df)
 
-        print(f"✅ ETL FINALIZADO COM SUCESSO! Tabela: {DB_NAME}.{STAGING_TABLE_NAME}")
+        print(f"✅ ETL FINALIZADO COM SUCESSO! Tabela: {STAGING_TABLE_NAME}")
 
     except Exception as e:
         print(f"❌ ERRO FATAL NO PIPELINE: {e}")

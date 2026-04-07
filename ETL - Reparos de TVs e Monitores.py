@@ -6,7 +6,6 @@ from sqlalchemy.types import Integer, String, DateTime, Text, Float
 from sqlalchemy.schema import Table, Column, MetaData
 
 # --- Seção 1: Configurações de Caminho ---
-# Atualizado para o novo arquivo de TVs e Monitores
 EXCEL_FILE_PATH = r"C:\Users\lucas.barros\OneDrive - BELMICRO TECNOLOGIA SA\Área de Trabalho\Scripts Python\REPAROS TVS MONITORES ETL.xlsx"
 EXCEL_SHEET_NAME = "BASE"
 
@@ -16,15 +15,15 @@ DB_PASSWORD = 'root'
 DB_HOST = 'localhost'
 DB_PORT = 3306
 DB_NAME = 'belmicro'
-STAGING_TABLE_NAME = 'staging_reparos_tvs' # Nome sugerido para diferenciar da anterior
+STAGING_TABLE_NAME = 'staging_reparos_tvs'
 
-# --- Seção 3: Mapeamento de Colunas (TVs e Monitores) ---
+# --- Seção 3: Mapeamento de Colunas ---
 COLUMN_MAPPING_AND_TYPES = {
     'FABRICANTE': {'new_name': 'fabricante', 'type': String(100)},
     'SKU': {'new_name': 'sku', 'type': Integer},
     'SERIES': {'new_name': 'num_serie', 'type': String(100)},
     'APARELHO': {'new_name': 'aparelho', 'type': String(100)},
-    'POLEGADAS': {'new_name': 'polegadas', 'type': String(50)}, # Pode ser Float se preferir tratar numericamente
+    'POLEGADAS': {'new_name': 'polegadas', 'type': String(50)},
     'DEFEITO': {'new_name': 'defeito_reclamado', 'type': String(255)},
     'DIAGNÓSTICO': {'new_name': 'diagnostico_tecnico', 'type': Text},
     'AÇÃO': {'new_name': 'acao_realizada', 'type': String(255)},
@@ -55,8 +54,6 @@ def run_etl_reparos_tvs():
 
         # 1. Leitura
         df = pd.read_excel(EXCEL_FILE_PATH, sheet_name=EXCEL_SHEET_NAME)
-        
-        # Limpeza básica de nomes de colunas (remove espaços extras)
         df.columns = df.columns.str.strip()
         
         # 2. Filtro e Renomeação
@@ -79,21 +76,30 @@ def run_etl_reparos_tvs():
         engine = create_engine(f"mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}")
         metadata = MetaData()
         
-        # Define colunas fisicamente para o SQL
-        table_columns = [Column(v['new_name'], v['type']) for v in COLUMN_MAPPING_AND_TYPES.values()]
+        # --- BLOCO DE DEFINIÇÃO DA TABELA COM AUTO_INCREMENT ---
+        table_columns = [
+            Column('id', Integer, primary_key=True, autoincrement=True) # ID automático definido aqui
+        ]
+        
+        # Mapeia as outras colunas conforme o dicionário
+        for v in COLUMN_MAPPING_AND_TYPES.values():
+            table_columns.append(Column(v['new_name'], v['type']))
+        
         table_columns.append(Column('data_carga_dw', DateTime))
         
         with engine.begin() as conn:
+            # Dropa a tabela anterior para recriar com a PK
             conn.execute(text(f"DROP TABLE IF EXISTS {STAGING_TABLE_NAME}"))
             
-            # Cria a tabela com a nova estrutura
+            # Cria a estrutura fisicamente no banco
             staging_table = Table(STAGING_TABLE_NAME, metadata, *table_columns)
             staging_table.create(conn)
             
+            # Insere os dados (O MySQL gera os IDs automaticamente para cada linha inserida)
             df.to_sql(STAGING_TABLE_NAME, conn, if_exists='append', index=False)
             auditoria_simples(df)
 
-        print(f"✅ CARGA CONCLUÍDA: {STAGING_TABLE_NAME} está atualizada.")
+        print(f"✅ CARGA CONCLUÍDA: {STAGING_TABLE_NAME} criada com ID Auto-Increment.")
 
     except Exception as e:
         print(f"❌ ERRO: {e}")

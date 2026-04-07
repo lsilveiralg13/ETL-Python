@@ -1,13 +1,15 @@
 import pandas as pd
 import numpy as np
+import os
 from sqlalchemy import create_engine, text
-from sqlalchemy.types import Integer, String, Numeric, DateTime
+from sqlalchemy.types import Integer, String, DateTime
 from sqlalchemy.schema import Table, Column, MetaData
 
 # --- Seção 1: Configurações ---
 EXCEL_FILE = "ESTOQUE BELMICRO ETL.xlsx"
 EXCEL_SHEET_NAME = "BASE"
 
+# --- Seção 2: Configurações de Banco ---
 DB_USER = 'root'
 DB_PASSWORD = 'root'
 DB_HOST = 'localhost'
@@ -15,7 +17,7 @@ DB_PORT = 3306
 DB_NAME = 'belmicro'
 STAGING_TABLE_NAME = 'staging_estoque_belmicro'
 
-# Mapeamento (Inibindo Cod. Marca e Cod. Grupo conforme solicitado)
+# --- Seção 3: Mapeamento de Colunas ---
 COLUMN_MAPPING_AND_TYPES = {
     'Grupo': {'new_name': 'grupo', 'type': String(100)},
     'Marca': {'new_name': 'marca', 'type': String(100)},
@@ -26,18 +28,13 @@ COLUMN_MAPPING_AND_TYPES = {
 }
 
 def auditoria_estoque(df):
-    """
-    Gera insights rápidos sobre a carga de estoque.
-    """
     print("\n" + "🔍" + " —" * 25)
     print("RESUMO DE AUDITORIA: ESTOQUE BELMICRO")
     print("— " * 26)
 
-    # 1. Qualidade e Volume
     print(f"📌 CHECK-UP DE DADOS:")
     print(f"- SKUs Processados: {len(df)}")
     
-    # 2. Insights de Negócio
     total_disponivel = df['estoque'].sum() - df['reserva'].sum()
     print(f"- Total Peças em Estoque: {df['estoque'].sum()}")
     print(f"- Total Peças Reservadas: {df['reserva'].sum()}")
@@ -56,44 +53,49 @@ def run_etl_estoque():
         print(f"--- Iniciando ETL de Estoque: {DB_NAME} ---")
 
         # 1. Extração
+        if not os.path.exists(EXCEL_FILE):
+            print(f"❌ Arquivo não encontrado: {EXCEL_FILE}")
+            return
+            
         df = pd.read_excel(EXCEL_FILE, sheet_name=EXCEL_SHEET_NAME)
         print(f"✅ Extração concluída: {len(df)} linhas lidas.")
 
-        # 2. Transformação (Filtragem e Renomeação)
-        # Pega apenas as colunas que definimos no mapeamento (ignorando as IDs de marca/grupo)
+        # 2. Transformação
         cols_to_keep = [c for c in COLUMN_MAPPING_AND_TYPES.keys() if c in df.columns]
         df = df[cols_to_keep].rename(columns={k: v['new_name'] for k, v in COLUMN_MAPPING_AND_TYPES.items()})
 
-        # 2.1 Tratamento de Nulos (Garante que estoque/reserva não quebrem o SQL)
         df['estoque'] = df['estoque'].fillna(0).astype(int)
         df['reserva'] = df['reserva'].fillna(0).astype(int)
-
-        # 2.2 Auditoria Temporal
         df['data_carga_dw'] = pd.Timestamp.now()
 
-        # 3. Carga (MySQL)
+        # 3. Conexão e Definição de Estrutura
         mysql_url = f"mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
         engine = create_engine(mysql_url)
-        
         metadata = MetaData()
-        table_columns = [Column(v['new_name'], v['type']) for v in COLUMN_MAPPING_AND_TYPES.values()]
+        
+        # --- DEFINIÇÃO DA COLUNA ID COM AUTO-INCREMENT ---
+        table_columns = [
+            Column('id', Integer, primary_key=True, autoincrement=True)
+        ]
+        
+        # Adiciona colunas do mapeamento
+        for v in COLUMN_MAPPING_AND_TYPES.values():
+            table_columns.append(Column(v['new_name'], v['type']))
+        
         table_columns.append(Column('data_carga_dw', DateTime))
         
-        # Nota: O ID você comentou que insere manualmente ou via Auto-Increment no MySQL
-        # Se quiser que o SQLAlchemy crie a coluna de ID automaticamente, basta adicionar:
-        # table_columns.insert(0, Column('id', Integer, primary_key=True, autoincrement=True))
-
+        # 4. Carga
         with engine.begin() as conn:
             print(f"🗑️ Limpando staging: {STAGING_TABLE_NAME}")
             conn.execute(text(f"DROP TABLE IF EXISTS {STAGING_TABLE_NAME}"))
             
-            print(f"🔨 Criando estrutura...")
-            metadata.create_all(conn)
+            print(f"🔨 Criando estrutura com ID PK...")
+            staging_table = Table(STAGING_TABLE_NAME, metadata, *table_columns)
+            staging_table.create(conn)
             
             print(f"📤 Enviando dados...")
             df.to_sql(STAGING_TABLE_NAME, conn, if_exists='append', index=False)
             
-            # Auditoria final
             auditoria_estoque(df)
 
         print(f"✅ ETL ESTOQUE FINALIZADO! Tabela: {STAGING_TABLE_NAME}")
