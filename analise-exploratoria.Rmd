@@ -1,0 +1,194 @@
+---
+title: "Dados Categóricos"
+author: "Diego Braga"
+date: "2024-04-08"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+# R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+
+
+**instalando Pacotes utilizados**
+```{r, echo=FALSE}
+
+options(repos = "https://cloud.r-project.org/")
+
+if(!require(tidyverse)){install.packages("tidyverse"); require(tidyverse)}
+if(!require(readxl)){install.packages("readxl"); library(readxl)}
+if(!require(gridExtra)){install.packages("gridExtra"); require(gridExtra)}
+if(!require(jmv)){install.packages("jmv"); require(jmv)}
+if(!require(glue)){install.packages("glue"); require(glue)}
+if(!require(gt)){install.packages("gt"); require(gt)}
+if(!require(kableExtra)){install.packages("kableExtra"); require(kableExtra)}
+if(!require(epitools)){install.packages("epitools"); require(epitools)}
+if(!require(dplyr)){install.packages("dplyr"); require(dplyr)}
+if(!require(writexl)){install.packages("writexl");require(writexl)}
+if(!require(stringr)){install.packages("stringr");require(stringr)}
+if(!require(ggplot2)){install.packages("ggplot");require(ggplot2)}
+if(!require(cowplot)){install.packages("cowplot");require(cowplot)}
+if(!require(vcd)){install.packages("vcd");require(vcd)}
+if(!require(epitools)){install.packages("epitools"); require(epitools)}
+if(!require(tinytex)){install.packages("tinytex"); require(tinytex)}
+if(!require(latexpdf)){install.packages("latexpdf"); require(latexpdf)}
+if(!require(knitr)){install.packages("knitr"); require(knitr)}
+if(!require(dlookr)){install.packages("dlookr"); require(dlookr)} 
+
+```
+
+
+
+
+**Carregando o dataset**
+```{r pressure, echo=FALSE}
+dados <- read_excel("C:/Users/diego.braga/Downloads/Reparo por Mes - Producao por Data do Reparo - abr.xlsx", 
+    sheet = "new sheet")
+```
+
+**Identidicando os Tipos de Variáveis**
+```{r, echo=FALSE}
+tipo_dados <- str(dados) # Identificar tipo de dados
+```
+
+```{r,  echo=FALSE}
+colnames(dados)[colnames(dados)== "Data"] <- "Mes"
+```
+
+```{r, echo=FALSE}
+reparo_mes <- aggregate(dados$QTD ~ format(dados$Mes, "%Y-%m"), data = dados, FUN = sum)
+colnames(reparo_mes) <- c("Mes", "QTD_Reparos")
+
+```
+
+# Exploração Inicial dos Dados
+
+**Contando valores unicos de cada coluna**
+```{r, echo=TRUE}
+sapply(dados,  function(x) length(unique(x))) # Contagem de valores únicos em cada coluna
+```
+O interesse aqui está na coluna "Defeito" com 168 defeitos diferentes relatados
+coluna Sintoma com 71 sintomas diferentes relatados 
+
+**contando os valores para cada defeito e sintoma**
+```{r, echo=TRUE}
+table_defeito <- table(dados$Defeito) # Conta a frequência de cada defeito
+table_sintoma <- table(dados$Sintoma) #Conta a frequência de cada sintoma
+
+```
+
+## Separando o dataset pelos 15 maiores defeitos
+Com isso poderemos entender melhor quais defeitos são mais frequentemente associados aos sintomas mais comuns. Direcionando desta maneira para os problemas mais prevalentes é esperado e retidada de insights mais precisos sobre os defeitos mais comuns e suas relações com os sintomas predominantes. Com está abordagem nos ajudará a priorizar áreas de melhoria e intervenção no processo de produção.
+
+**separando os 15 maiores sintomas**
+```{r, echo=TRUE}
+top15_sintomas <- names(head(sort(table_sintoma, decreasing = TRUE), 15)) # Selecionar os 15 maiores sintomas
+dados_maiores_sintomas <- dados[dados$Sintoma %in% top15_sintomas,] # Filtrar o conjunto de dados pelos 15 maiores sintomas
+
+unique(dados_maiores_sintomas$Sintoma) #Verificar se a filtragem foi bem-sucedida
+
+```
+ 
+ Os maiores Sintomas encontrados
+ 
+ 
+```{r, echo=TRUE}
+tabelas_defeitos <- list() #Criar uma lista para armazenar as tabelas de frequência
+
+#Iterar sobre cada um dos 15 maiores sintomas
+for (sintoma in top15_sintomas) {
+  dados_sintoma <- dados_maiores_sintomas[dados_maiores_sintomas$Sintoma == sintoma,] ## Filtrar o conjunto de dados para o sintoma atual
+  
+  tabela_defeitos <- table(dados_sintoma$Defeito) #Construir a tabela de frequência dos principais defeitos para este sintoma
+  tabelas_defeitos[[sintoma]] <- tabelas_defeitos
+}
+
+for (i in 1:length(tabelas_defeitos)) { 
+  cat("Sintoma:", top15_sintomas[i], "\n") # Imprimir o nome do sintoma atual
+  print(tabelas_defeitos[[i]])# Imprimir a tabela de frequência de defeitos para o sintoma atual
+  cat("\n")  #Imprimir uma linha em branco para separar os resultados
+}
+
+
+
+```
+ 
+ 
+```{r}
+
+tabelas_defeitos <- list() # Criar uma lista para armazenar as tabelas de frequência dos defeitos
+
+# Iterar sobre cada um dos 15 maiores sintomas
+for (sintoma in top15_sintomas) {
+  dados_sintoma <- dados_maiores_sintomas[dados_maiores_sintomas$Sintoma == sintoma,] ## Filtrar o conjunto de dados para o sintoma atual
+  freq_defeitos <- table(dados_sintoma$Defeito) # Calcular a frequência de cada defeito para o sintoma atual
+  
+  defeitos_maiores <- names(sort(freq_defeitos, decreasing = TRUE)[freq_defeitos >= 10]) ## Selecionar os defeitos cuja a soma das frequências seja maior ou igual a 5
+  
+  tabela_defeitos <- table(dados_sintoma$Defeito[dados_sintoma$Defeito %in% defeitos_maiores])
+  tabela_defeitos <- tabela_defeitos[order(-tabela_defeitos)] # Ordenar a tabela de frequência em ordem decrescente
+  
+  tabelas_defeitos[[sintoma]] <- tabela_defeitos # Adicionar a tabela de frequência dos principais defeitos para este sintoma
+}
+
+
+
+for (i in 1:length(tabelas_defeitos)) { 
+  cat("Sintoma:", top15_sintomas[i], "\n") # Imprimir o nome do sintoma atual
+  tabela_defeitos_filtrada <- tabelas_defeitos[[i]][tabelas_defeitos[[i]] >= 10] # Filtrar a tabela de frequência para incluir apenas defeitos com frequência maior ou igual a 10
+  print(tabelas_defeitos[[i]])# Imprimir a tabela de frequência de defeitos para o sintoma atual
+  cat("\n")  #Imprimir uma linha em branco para separar os resultados
+}
+
+
+```
+ 
+ 
+```{r}
+tabelas_defeitos <- list() # Criar uma lista para armazenar as tabelas de frequência dos defeitos
+
+# Iterar sobre cada um dos 15 maiores sintomas
+for (sintoma in top15_sintomas) {
+  dados_sintoma <- dados_maiores_sintomas[dados_maiores_sintomas$Sintoma == sintoma,] ## Filtrar o conjunto de dados para o sintoma atual
+  freq_defeitos <- table(dados_sintoma$Defeito) # Calcular a frequência de cada defeito para o sintoma atual
+  
+  defeitos_maiores <- names(sort(freq_defeitos, decreasing = TRUE)[freq_defeitos >= 10]) ## Selecionar os defeitos cuja a soma das frequências seja maior ou igual a 5
+  
+  tabela_defeitos <- table(dados_sintoma$Defeito[dados_sintoma$Defeito %in% defeitos_maiores])
+  tabela_defeitos <- tabela_defeitos[order(-tabela_defeitos)] # Ordenar a tabela de frequência em ordem decrescente
+  
+  tabelas_defeitos[[sintoma]] <- tabela_defeitos # Adicionar a tabela de frequência dos principais defeitos para este sintoma
+}
+
+
+
+for (i in 1:length(tabelas_defeitos)) { 
+  cat("Sintoma:", top15_sintomas[i], "\n") # Imprimir o nome do sintoma atual
+  tabela_defeitos_filtrada <- tabelas_defeitos[[i]][tabelas_defeitos[[i]] >= 10]  # Filtrar a tabela de frequência para incluir apenas defeitos com frequência maior ou igual a 10
+  print(tabela_defeitos_filtrada)# Imprimir a tabela de frequência de defeitos para o sintoma atual
+  cat("\n")  #Imprimir uma linha em branco para separar os resultados
+}
+
+```
+ 
+
+
+
+
+
+
+
+
+
+
+
+

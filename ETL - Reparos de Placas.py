@@ -34,7 +34,8 @@ COLUMN_MAPPING_AND_TYPES = {
     'PRODUTO': {'new_name': 'produto_desc', 'type': String(255)},
     'CHAVE_MES': {'new_name': 'chave_mes', 'type': String(15)},
     'CHAVE_ANO': {'new_name': 'chave_ano', 'type': Integer},
-    'QTD': {'new_name': 'quantidade', 'type': Integer}
+    'QTD': {'new_name': 'quantidade', 'type': Integer},
+    'CATEGORIA': {'new_name': 'categoria', 'type': String(100)}
 }
 
 def auditoria_simples(df):
