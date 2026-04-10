@@ -13,8 +13,9 @@ TABELAS_PARA_CORRIGIR = [
     'staging_telecontrol',
     'staging_estoque_belmicro',
     'staging_reparos',
-    'staging_ocorrencias'
-    'staging_reparos_tvs'
+    'staging_ocorrencias',
+    'staging_reparos_tvs',
+    'staging_producao_pcs'
 ]
 
 def aplicar_indices_pk():
