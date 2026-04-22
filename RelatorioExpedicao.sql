@@ -1,10 +1,22 @@
-/* RELATÓRIO DE EXPEDIÇÃO E PRODUÇÃO - PRODUTO ACABADO (v1.2)
-   Filtros: Apenas Marcas Próprias | Exclui Componentes
+/* RELATÓRIO DE EXPEDIÇÃO E PRODUÇÃO - VERSÃO ROTINA (v1.4)
+   Configuração: Escolha entre ver o ano fechado ou um mês específico.
 */
 
-DECLARE @AnoConsulta INT = 2026;
-DECLARE @MesConsulta INT = NULL;
+-- ==========================================
+-- 1. CONFIGURAÇÃO DE PARÂMETROS (AJUSTE AQUI)
+-- ==========================================
+DECLARE @AnoConsulta  INT = 2026;         -- Ano desejado
+DECLARE @MesConsulta  INT = 4;            -- Mês desejado
+DECLARE @TipoConsulta VARCHAR(10) = 'ANO'; -- Opções: 'MES' ou 'ANO'
 
+/* DICA: 
+   Se @TipoConsulta = 'MES', ele filtra o Ano e o Mês escolhidos.
+   Se @TipoConsulta = 'ANO', ele ignora o mês e traz o ano inteiro (2025 e 2026).
+*/
+
+-- ==========================================
+-- 2. CONSULTA PRINCIPAL
+-- ==========================================
 SELECT
     YEAR(EXP.DataExpedicao)                         AS Ano,
     MONTH(EXP.DataExpedicao)                        AS Mes,
@@ -19,6 +31,7 @@ SELECT
     'EXPEDIDO'                                      AS Situacao,
     EXP.DataExpedicao                               AS DataExpedicaoCompleta,
     I.CodLocal                                      AS CodLocalEstoque,
+    CAST(I.ValorTotal AS DECIMAL(18,2))             AS ValorTotal,
     CAST(I.QtdNegociada AS INT)                     AS Quantidade,
     GP.LinhaDeNegocio,
     GP.NomeGrupoFamilia
@@ -33,12 +46,14 @@ INNER JOIN cadastros.dim_grupo_produtos GP WITH (NOLOCK)
 
 WHERE EXP.DataExpedicao IS NOT NULL
   AND P.UsadoComo = 'Venda (fabricação própria)'
-  -- FILTRO DE MARCAS/LINHAS PRÓPRIAS
   AND (GP.LinhaDeNegocio = 'WordPC/Skill' OR P.Marca = 'HQ')
-  -- EXCLUSÃO DE COMPONENTES (PRODUTO ACABADO APENAS)
   AND GP.NomeGrupoPai <> 'COMPONENTES' 
-  -- FILTROS DE TEMPO
-  AND YEAR(EXP.DataExpedicao) = @AnoConsulta
-  AND (@MesConsulta IS NULL OR MONTH(EXP.DataExpedicao) = @MesConsulta)
+
+  -- LÓGICA DE FILTRO DINÂMICO
+  AND (
+      (@TipoConsulta = 'MES' AND YEAR(EXP.DataExpedicao) = @AnoConsulta AND MONTH(EXP.DataExpedicao) = @MesConsulta)
+      OR 
+      (@TipoConsulta = 'ANO' AND YEAR(EXP.DataExpedicao) IN (2025, 2026))
+  )
 
 ORDER BY EXP.DataExpedicao DESC;
