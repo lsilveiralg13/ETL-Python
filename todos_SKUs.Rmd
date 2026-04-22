@@ -1,0 +1,89 @@
+---
+title: "Todas Telas"
+author: "Diego Braga"
+date: "2025-01-18"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+Sys.setlocale("LC_ALL", "pt_BR.UTF-8")
+```
+
+```{r, include=FALSE}
+options(repos = "https://cloud.r-project.org/")
+
+if(!require(tidyverse)){install.packages("tidyverse"); require(tidyverse)}
+if(!require(grid)){install.packages("grid"); require(grid)}
+if(!require(readxl)){install.packages("readxl"); library(readxl)}
+if(!require(gridExtra)){install.packages("gridExtra"); require(gridExtra)}
+if(!require(kableExtra)){install.packages("kableExtra"); require(kableExtra)}
+if(!require(dplyr)){install.packages("dplyr"); require(dplyr)}
+if(!require(writexl)){install.packages("writexl");require(writexl)}
+if(!require(stringr)){install.packages("stringr");require(stringr)}
+if(!require(ggplot2)){install.packages("ggplot");require(ggplot2)}
+if(!require(knitr)){install.packages("knitr"); require(knitr)}
+if(!require(rmarkdown)){install.packages("rmarkdown"); require(rmarkdown)}
+if(!require(binom)){install.packages("binom"); require(binom)}
+if(!require(tibble)){install.packages("tibble"); require(tibble)}
+if(!require(igraph)){install.packages("igraph"); require(igraph)}
+if(!require(ggraph)){install.packages("ggraph"); require(ggraph)}
+if(!require(corrplot)){install.packages("corrplot"); require(corrplot)}
+if(!require(dbscan)){install.packages("dbscan"); require(dbscan)}
+if(!require(factoextra)){install.packages("factoextra"); require(factoextra)}
+if(!require(survival)){install.packages("survival"); require(survival)}
+if(!require(fitdistrplus)){install.packages("fitdistrplus"); require(fitdistrplus)}
+if(!require(lubridate)){install.packages("lubridate"); require(lubridate)}
+if(!require(dplyr)){install.packages("dplyr"); require(dplyr)}
+if(!require(survminer)){install.packages("survminer"); require(survminer)}
+
+
+```
+
+# Estimativa do número de Assistência de para Telas HQ KGH 60 polegadas
+
+A estimativa de Kaplan-Meier é uma técnica estatística usada para estimar a função de sobrevivência, ou seja, a probabilidade de um evento, como uma falha de equipamento, não ocorrer até um determinado ponto no tempo. No contexto da análise, ela pode ser aplicada para estimar a quantidade de telas que irão para assistência nos próximos 12 meses, considerando a data de expedição como o início da vida útil e a garantia de 12 meses. A técnica é especialmente útil em cenários com dados censurados, onde alguns eventos (como falhas) não ocorreram durante o período de observação. Ela permite calcular a probabilidade de falha ao longo do tempo e gerar uma curva de sobrevivência, que pode ser usada para prever o número de telas que provavelmente irão para assistência durante o próximo ano, com base nas taxas de falha observadas historicamente.
+
+```{r, include=FALSE}
+assistencia <- read_excel("C:/Users/diego.braga/OneDrive - BEL MICRO TECNOLOGIA S A/Desktop/DIEGO/R/telas_exp_assit.xlsx", 
+    sheet = "assist")
+
+expedidos <- read_excel("C:/Users/diego.braga/OneDrive - BEL MICRO TECNOLOGIA S A/Desktop/DIEGO/R/telas_exp_assit.xlsx", 
+    sheet = "Expedido")
+
+assistencia$`Dt. Assistência` <- as.Date(assistencia$`Dt. Assistência`, format="%Y-%m-%d")
+expedidos$`DT_EXP` <- as.Date(expedidos$`DT_EXP`, format="%Y-%m-%d")
+
+
+# Dividir os dados da planilha "assistencia" pela coluna CODPROD
+assistencia_split <- split(assistencia, assistencia$CODPROD)
+
+# Dividir os dados da planilha "expedidos" pela coluna CODPROD
+expedidos_split <- split(expedidos, expedidos$CODPROD)
+
+# Aplicar a transformação para cada grupo nos dados divididos
+assistencia_split <- lapply(assistencia_split, function(df) {
+  df %>%
+    mutate(
+      MesAno = paste0(
+        str_pad(month(df$`Dt. Assistência`), width = 2, side = "left", pad = "0"),
+        "-",
+        year(df$`Dt. Assistência`)
+      )
+    )
+})
+
+expedidos_split <- lapply(expedidos_split, function(df) {
+  df %>%
+    mutate(
+      MesAno = paste0(
+        str_pad(month(df$DT_EXP), width = 2, side = "left", pad = "0"),
+        "-",
+        year(df$DT_EXP)
+      )
+    )
+})
+
+
+
+```

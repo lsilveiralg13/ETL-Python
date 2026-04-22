@@ -2,7 +2,17 @@ import pandas as pd
 import os
 import xlsxwriter
 import re
-import numpy as np # Importado para tratar NaN e Inf
+import numpy as np
+import locale
+
+# Tentar configurar locale para PT-BR
+try:
+    locale.setlocale(locale.LC_TIME, 'pt_BR.UTF-8')
+except:
+    try:
+        locale.setlocale(locale.LC_TIME, 'Portuguese_Brazil.1252')
+    except:
+        print("Aviso: Não foi possível configurar locale para PT-BR. Meses podem vir em inglês.")
 
 def limpar_moedas(valor):
     if pd.isna(valor):
@@ -32,20 +42,45 @@ def converter_csv_para_xlsx(caminho_arquivo_csv, caminho_arquivo_xlsx_saida):
         return
 
     try:
-        # 2. Ler o arquivo CSV
         df = pd.read_csv(caminho_arquivo_csv, sep=',', quotechar='"', encoding='utf-8', on_bad_lines='warn')
         
-        # --- AJUSTE CRÍTICO PARA O ERRO NAN/INF ---
-        # Substitui Infinitos por NaN e preenche NaNs com 0 para evitar erro no XlsxWriter
         df = df.replace([np.inf, -np.inf], np.nan)
-        # ------------------------------------------
 
         print(f"Arquivo CSV '{caminho_arquivo_csv}' lido com sucesso. Total de {df.shape[0]} linhas.")
 
         if df.empty:
-            print("O DataFrame está vazio. Nenhum dado para escrever no Excel.")
+            print("O DataFrame está vazio.")
             return
 
+        # =============================
+        # 🔥 TRATAMENTO DE DATA
+        # =============================
+        if 'DataExpedicao' in df.columns:
+
+            def converter_data(valor):
+                if pd.isna(valor):
+                    return pd.NaT
+                
+                valor = str(valor)
+
+                try:
+                    if '-' in valor:
+                        return pd.to_datetime(valor, format='%Y-%m-%d', errors='coerce')
+                    elif '/' in valor:
+                        return pd.to_datetime(valor, format='%d/%m/%Y', errors='coerce')
+                    else:
+                        return pd.to_datetime(valor, errors='coerce')
+                except:
+                    return pd.NaT
+
+            df['DATA_CONVERTIDA'] = df['DataExpedicao'].apply(converter_data)
+
+            df['CHAVE_MMM'] = df['DATA_CONVERTIDA'].dt.strftime('%B').str.upper()
+            df['CHAVE_AAA'] = df['DATA_CONVERTIDA'].dt.strftime('%Y').str.upper()
+
+        # =============================
+        # 🔢 TRATAMENTO NUMÉRICO
+        # =============================
         numeric_cols_for_processing = [
             'Meta', 'Vendido', 'GAP (R$)', 'Itens', 'Conversao', 'VLM', 
             'Atingimento', 'QTD_BOLSAS', 'QTD_SAPATOS', 'QTD_ACESSORIOS', 
@@ -65,19 +100,37 @@ def converter_csv_para_xlsx(caminho_arquivo_csv, caminho_arquivo_xlsx_saida):
                     if col_name in ['Atingimento', '%B_P']:
                         df[col_name] = df[col_name].apply(lambda x: x / 100 if pd.notna(x) and x > 1 else x)
                 
-                # Preencher com 0 garante que a soma e a escrita no Excel funcionem
                 df[col_name] = df[col_name].fillna(0)
 
-        # 3. Preparar o ExcelWriter com motor de tolerância a erros
-        # Adicionado 'engine_kwargs' para converter NaN/Inf em erros de célula amigáveis
-        writer = pd.ExcelWriter(caminho_arquivo_xlsx_saida, 
-                                engine='xlsxwriter', 
-                                engine_kwargs={'options': {'nan_inf_to_errors': True}})
+        # =============================
+        # 📊 TOTAL
+        # =============================
+        total_row_data = {}
+        for col in df.columns:
+            if col in ['Meta', 'Vendido', 'GAP (R$)', 'Itens', 'Conversao', 'QTD_BOLSAS', 'QTD_SAPATOS', 'QTD_ACESSORIOS', 'QTD_SACOLAS', 'TOTAL']:
+                total_row_data[col] = df[col].sum()
+            elif col in ['VLM', 'Atingimento', '%B_P']:
+                total_row_data[col] = df[col].mean()
+            elif col in ['Tipo_Evento', 'vendedor']:
+                total_row_data[col] = 'TOTAL' if col == 'Tipo_Evento' else ''
+            else:
+                total_row_data[col] = ''
+
+        df = pd.concat([df, pd.DataFrame([total_row_data])], ignore_index=True)
+        total_row_index_in_df = df.index[-1]
+
+        # =============================
+        # 📄 EXCEL
+        # =============================
+        writer = pd.ExcelWriter(
+            caminho_arquivo_xlsx_saida, 
+            engine='xlsxwriter', 
+            engine_kwargs={'options': {'nan_inf_to_errors': True}}
+        )
         
         workbook = writer.book
         worksheet = workbook.add_worksheet()
 
-        # 4. Definir formatos (Mantendo seus padrões Calibri 9)
         fmt_base = {'align': 'center', 'valign': 'vcenter', 'font_name': 'Calibri', 'font_size': 9}
         
         default_cell_format = workbook.add_format(fmt_base)
@@ -90,41 +143,19 @@ def converter_csv_para_xlsx(caminho_arquivo_csv, caminho_arquivo_xlsx_saida):
 
         currency_format = workbook.add_format({**fmt_base, 'num_format': 'R$ #,##0.00'})
         percentage_format = workbook.add_format({**fmt_base, 'num_format': '0.00%'})
-        
-        # Formatos condicionais
-        red_format = workbook.add_format({**fmt_base, 'bg_color': '#FFC7CE', 'font_color': '#9C0006'})
-        orange_format = workbook.add_format({**fmt_base, 'bg_color': '#FFEB9C', 'font_color': '#9C6500'})
-        yellow_format = workbook.add_format({**fmt_base, 'bg_color': '#FFFD00', 'font_color': '#9C6500'})
-        green_format = workbook.add_format({**fmt_base, 'bg_color': '#C6EFCE', 'font_color': '#006100'})
 
-        # --- Calcular e adicionar a linha de TOTAL ---
-        total_row_data = {}
-        for col in df.columns:
-            if col in ['Meta', 'Vendido', 'GAP (R$)', 'Itens', 'Conversao', 'QTD_BOLSAS', 'QTD_SAPATOS', 'QTD_ACESSORIOS', 'QTD_SACOLAS', 'TOTAL']:
-                total_row_data[col] = df[col].sum()
-            elif col in ['VLM', 'Atingimento', '%B_P']:
-                total_row_data[col] = df[col].mean()
-            elif col in ['Tipo_Evento', 'vendedor']:
-                total_row_data[col] = 'TOTAL' if col == 'Tipo_Evento' else ''
-            else:
-                total_row_data[col] = '' 
-        
-        df = pd.concat([df, pd.DataFrame([total_row_data])], ignore_index=True)
-        total_row_index_in_df = df.index[-1]
-
-        # 5. Escrever cabeçalhos
+        # Cabeçalho
         for col_num, value in enumerate(df.columns.values):
             worksheet.write(0, col_num, value, header_format)
 
-        # 6. Escrever dados e formatar
+        # Dados
         for row_num, row_data in df.iterrows():
             excel_row = row_num + 1
             is_total_row = (row_num == total_row_index_in_df)
 
             for col_num, value in enumerate(row_data):
                 col_name = df.columns[col_num]
-                
-                # Se o valor for NaN após todo o processamento, escreve vazio
+
                 if pd.isna(value):
                     worksheet.write(excel_row, col_num, '', default_cell_format)
                     continue
@@ -136,19 +167,12 @@ def converter_csv_para_xlsx(caminho_arquivo_csv, caminho_arquivo_xlsx_saida):
                 elif col_name in ['Atingimento', '%B_P']:
                     fmt = total_percentage_format if is_total_row else percentage_format
                     worksheet.write(excel_row, col_num, value, fmt)
-                    
-                    if col_name == 'Atingimento' and not is_total_row:
-                        if value < 0.50: cond = red_format
-                        elif value < 0.70: cond = orange_format
-                        elif value < 0.90: cond = yellow_format
-                        else: cond = green_format
-                        worksheet.write(excel_row, col_num, value, cond)
                 
                 else:
                     fmt = total_default_format if is_total_row else default_cell_format
                     worksheet.write(excel_row, col_num, value, fmt)
-                
-        # 7. Ajustar largura das colunas
+
+        # Ajustar largura
         for col_num, col_name in enumerate(df.columns):
             max_len = max(df[col_name].astype(str).map(len).max(), len(col_name))
             worksheet.set_column(col_num, col_num, max_len + 2)
@@ -157,6 +181,8 @@ def converter_csv_para_xlsx(caminho_arquivo_csv, caminho_arquivo_xlsx_saida):
         print(f"Arquivo XLSX salvo com sucesso em '{caminho_arquivo_xlsx_saida}'.")
 
     except Exception as e:
-        print(f"Ocorreu um erro durante a conversão e formatação: {e}")
+        print(f"Erro: {e}")
 
+
+# EXECUÇÃO
 converter_csv_para_xlsx("ResultadoSQL.csv", "ResultadoSQL.xlsx")
