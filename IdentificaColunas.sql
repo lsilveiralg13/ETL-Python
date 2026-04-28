@@ -1,0 +1,7 @@
+SELECT
+	TABLE_NAME AS [Tabela],
+	COLUMN_NAME AS [Coluna]
+FROM INFORMATION_SCHEMA.COLUMNS
+WHERE TABLE_SCHEMA = 'cadastros'
+AND TABLE_NAME IN ('dim_regioes', 'dim_uf', 'dim_vendedor')
+ORDER BY TABLE_NAME, COLUMN_NAME;

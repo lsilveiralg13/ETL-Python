@@ -18,6 +18,7 @@ DECLARE @TipoConsulta VARCHAR(10) = 'ANO'; -- Opções: 'MES' ou 'ANO'
 -- 2. CONSULTA PRINCIPAL
 -- ==========================================
 SELECT
+	EXP.NumUnicoNota,
     YEAR(EXP.DataExpedicao)                         AS Ano,
     MONTH(EXP.DataExpedicao)                        AS Mes,
     DATEPART(ISO_WEEK, EXP.DataExpedicao)           AS Semana,
