@@ -38,7 +38,8 @@ UNION ALL
 -- PARTE 2: REGRA B (REVENDA HQ + LINHA BRANCA / MONITORES)
 SELECT
     EXP.NumUnicoNota, YEAR(EXP.DataExpedicao) AS Ano, MONTH(EXP.DataExpedicao) AS Mes,
-    DATEPART(ISO_WEEK, EXP.DataExpedicao) AS Semana, CAST(EXP.DataExpedicao AS DATE) AS DataExpedicao,
+    DATEPART(ISO_WEEK, EXP.DataExpedicao) AS Semana, CAST(EXP.DataExpedicao AS DATE) AS DataEx
+    pedicao,
     I.CodProduto AS CodProd, P.DescricaoProduto, P.Marca AS Fornecedor, P.ModeloMkt AS Modelo,
     GP.NomeGrupoPai AS Familia, 'EXPEDIDO' AS Situacao, I.CodLocal AS CodLocalEstoque,
     GP.LinhaDeNegocio, GP.NomeGrupoFamilia, P.UsadoComo,
