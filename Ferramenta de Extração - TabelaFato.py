@@ -17,6 +17,7 @@ def aplicar_formatacao_belmicro(caminho_arquivo):
         for cell in row:
             cell.font = fonte_corpo
             cell.alignment = alinhamento_central
+            
 
     for cell in ws[1]:
         cell.font = fonte_cabecalho
