@@ -1,0 +1,171 @@
+table Calendario
+	lineageTag: 3a3c984e-79d9-498b-a9d3-0606e9cefcbd
+
+	column Date
+		formatString: General Date
+		lineageTag: 773519cf-8c13-4191-ba61-1be3a19b8e99
+		summarizeBy: none
+		isNameInferred
+		sourceColumn: [Date]
+
+		variation Variation
+			isDefault
+			relationship: 3e4467d0-5067-47fb-a16d-9742b733e261
+			defaultHierarchy: LocalDateTable_79b5ff50-78ae-4976-a65d-4da0a60eef09.'Date Hierarchy'
+
+		annotation SummarizationSetBy = Automatic
+
+	column Ano
+		formatString: 0
+		lineageTag: 12451220-cc94-4b99-9fba-154d3151eeae
+		summarizeBy: sum
+		isNameInferred
+		sourceColumn: [Ano]
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Mês Número'
+		formatString: 0
+		lineageTag: fb27d2cf-dc32-42a8-aaab-2c7159fe4da0
+		summarizeBy: sum
+		isNameInferred
+		sourceColumn: [Mês Número]
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Mês Nome'
+		lineageTag: 8c3333f4-eb3e-49fd-8d02-8006e439b08d
+		summarizeBy: none
+		isNameInferred
+		sourceColumn: [Mês Nome]
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Mês Nome Caixa Alta'
+		lineageTag: 058fa9bc-fca6-464f-a3d1-79010cfc8796
+		summarizeBy: none
+		isNameInferred
+		sourceColumn: [Mês Nome Caixa Alta]
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Mês Índice Nome'
+		lineageTag: 409376fa-0751-4df8-a3cc-8c4d7125da64
+		summarizeBy: none
+		isNameInferred
+		sourceColumn: [Mês Índice Nome]
+		sortByColumn: 'Mês Número'
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Mês Abrev'
+		lineageTag: 61d43f14-f926-4543-b820-5dd6c6039c89
+		summarizeBy: none
+		isNameInferred
+		sourceColumn: [Mês Abrev]
+
+		annotation SummarizationSetBy = Automatic
+
+	column Ano-Mês
+		lineageTag: 8d880f68-1d09-4358-bed8-c734c926dc75
+		summarizeBy: none
+		isNameInferred
+		sourceColumn: [Ano-Mês]
+
+		annotation SummarizationSetBy = Automatic
+
+	column Trimestre
+		lineageTag: bcc64597-8a6a-48f1-a808-1a90875707ba
+		summarizeBy: none
+		isNameInferred
+		sourceColumn: [Trimestre]
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Semana do Ano'
+		formatString: 0
+		lineageTag: dbb4effa-75e3-4c7c-8cc2-79468c5a907e
+		summarizeBy: sum
+		isNameInferred
+		sourceColumn: [Semana do Ano]
+
+		annotation SummarizationSetBy = Automatic
+
+	column Dia
+		formatString: 0
+		lineageTag: 22655848-b1cf-4ce4-897a-bc502585c2e4
+		summarizeBy: sum
+		isNameInferred
+		sourceColumn: [Dia]
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Dia da Semana Num'
+		formatString: 0
+		lineageTag: 7c50d3b6-a723-446b-a723-b404b62dee5f
+		summarizeBy: sum
+		isNameInferred
+		sourceColumn: [Dia da Semana Num]
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Dia da Semana'
+		lineageTag: 8760fe5f-774b-4457-8616-f6877b6df904
+		summarizeBy: none
+		isNameInferred
+		sourceColumn: [Dia da Semana]
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Dia Útil'
+		lineageTag: 3605f840-5dc0-46b0-8d66-50ea05f807a2
+		summarizeBy: none
+		isNameInferred
+		sourceColumn: [Dia Útil]
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Ordem Mês'
+		formatString: 0
+		lineageTag: 7d31021d-925b-4368-aac4-3ad47780ab54
+		summarizeBy: sum
+		isNameInferred
+		sourceColumn: [Ordem Mês]
+
+		annotation SummarizationSetBy = Automatic
+
+	partition Calendario = calculated
+		mode: import
+		source = ```
+				
+				ADDCOLUMNS(
+				    CALENDAR(DATE(2020,1,1), DATE(2030,12,31)),
+				    
+				    "Ano", YEAR([Date]),
+				    "Mês Número", MONTH([Date]),
+				    -- Forçando pt-BR no nome do mês
+				    "Mês Nome", FORMAT([Date], "MMMM", "pt-BR"),
+				    "Mês Nome Caixa Alta", UPPER(FORMAT([Date], "MMMM", "pt-BR")),
+				    
+				    -- Nova coluna concatenada: "1. JANEIRO", "2. FEVEREIRO", etc.
+				    "Mês Índice Nome", 
+				        COMBINEVALUES(". ", 
+				            FORMAT(MONTH([Date]), "0"), 
+				            UPPER(FORMAT([Date], "MMMM", "pt-BR"))
+				        ),
+				
+				    "Mês Abrev", FORMAT([Date], "MMM", "pt-BR"),
+				    "Ano-Mês", FORMAT([Date], "YYYY-MM"),
+				    "Trimestre", "T" & FORMAT([Date], "Q"),
+				    "Semana do Ano", WEEKNUM([Date]),
+				    "Dia", DAY([Date]),
+				    "Dia da Semana Num", WEEKDAY([Date], 2),
+				    -- Forçando pt-BR no dia da semana
+				    "Dia da Semana", FORMAT([Date], "dddd", "pt-BR"),
+				    "Dia Útil", IF(WEEKDAY([Date], 2) <= 5, "Sim", "Não"),
+				    "Ordem Mês", MONTH([Date])
+				)
+				```
+
+	annotation PBI_Id = 13ab1f9482494fda961da77365418c79
+

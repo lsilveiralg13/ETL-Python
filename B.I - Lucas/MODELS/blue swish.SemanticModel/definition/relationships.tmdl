@@ -1,0 +1,14 @@
+relationship 3e4467d0-5067-47fb-a16d-9742b733e261
+	joinOnDateBehavior: datePartOnly
+	fromColumn: Calendario.Date
+	toColumn: LocalDateTable_79b5ff50-78ae-4976-a65d-4da0a60eef09.Date
+
+relationship 3141098e-3e9b-4cca-99d8-8e6c123ba727
+	joinOnDateBehavior: datePartOnly
+	fromColumn: Ocorrências.Data
+	toColumn: LocalDateTable_e40b0f8a-4898-406c-8894-cd84334648f3.Date
+
+relationship AutoDetected_ed496bec-e8da-40b1-b065-10c8eaed399b
+	fromColumn: Ocorrências.'Mapa de Ocorrências e Riscos'
+	toColumn: ESQUELETO.'Mapa de Ocorrências e Riscos'
+

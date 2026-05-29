@@ -1,5 +1,6 @@
 import pandas as pd
 import os
+import re
 from openpyxl import load_workbook
 from openpyxl.styles import Font, Alignment, PatternFill
 
@@ -47,6 +48,7 @@ def formatar_excel(caminho_arquivo):
 
     wb.save(caminho_arquivo)
 
+
 def ler_csv_com_varredura(caminho):
     """Tenta ler o CSV testando os encodings sugeridos."""
     encodings = [
@@ -67,30 +69,42 @@ def ler_csv_com_varredura(caminho):
     
     raise Exception("Não foi possível converter o arquivo com nenhum dos encodings da lista.")
 
+
 def tratar_erros_e_caracteres(df):
     """
-    Varre o DataFrame para corrigir problemas de acentuação (Mojibake),
-    remover espaços extras e aplicar correções cirúrgicas em strings corrompidas.
+    Varre o DataFrame aplicando uma biblioteca robusta de padrões de acentuação corrompidos
+    e correções ortográficas universais para o ecossistema Excel/CSV.
     """
-    print("\nIniciando tratamento de caracteres e limpeza dos dados...")
+    print("\nIniciando tratamento de caracteres e acentuação com biblioteca robusta...")
     
-    # DICIONÁRIO DE CORREÇÃO CIRÚRGICA: Mapeia os erros exatos que aparecem na sua tela
-    substituicoes_comuns = {
-        'Ergon?mico': 'Ergonômico',
-        'ergon?mico': 'ergonômico',
-        'rota??o': 'rotação',
-        'inclina??o': 'inclinação',
-        'Ajuste de inclina??o': 'Ajuste de inclinação',
-        'Informa??o': 'Informação',
-        'Pre??o': 'Preço',
-        '??': 'ç'  # Substituição genérica para o que sobrou de ponto de interrogação duplo
+    # BIBLIOTECA EXPANDIDA: Mapeia padrões de quebras de codificação (Mojibake) e padrões gramaticais
+    biblioteca_acentuacao = {
+        # Padrões comuns de interrogações duplas ou caracteres corrompidos em sistemas legados
+        r'\?\?': 'ç',  # Caso geral de caracteres especiais perdidos
+        r'([aA])\?([oO])': r'\1ão', # Captura 'a?o' -> 'ão' (ex: rota??o, rota?o, inclina?o)
+        r'([aA])\?([asAS])': r'\1ãs', # Captura 'a?as' -> 'ãs'
+        r'([eE])\?([mI])': r'\1ê', # Captura 'e?m' -> 'êm' ou 'e?i' -> 'êi'
+        
+        # Correções cirúrgicas de palavras-chave de inventário, produção e logística
+        r'[eE]rgon\?[mI]nico': 'Ergonômico',
+        r'ergon\?[mI]nico': 'ergonômico',
+        r'[iI]nforma\?\?o': 'Informação',
+        r'[iI]nforma\?o': 'Informação',
+        r'[pP]re\?\?o': 'Preço',
+        r'[pP]re\?o': 'Preço',
+        
+        # Padrões comuns de exportações de ERPs corrompidas (UTF-8 lido como Windows-1252)
+        'Ã§Ã£o': 'ção', 'Ã£o': 'ão', 'Ã§': 'ç', 'Ã¡': 'á', 'Ã©': 'é', 
+        'Ã\xad': 'í', 'Ã³': 'ó', 'Ãº': 'ú', 'Ãª': 'ê', 'Ã´': 'ô',
+        'Ã\x81': 'Á', 'Ã\x89': 'É', 'Ã\x8d': 'Í', 'Ã\x93': 'Ó', 'Ã\x9a': 'Ú',
+        'Ã\x87': 'Ç', 'Ã\x83': 'Ã', 'Â°': '°', 'Âº': 'º', 'Âª': 'ª'
     }
 
     for col in df.columns:
         # Aplicar correções apenas em colunas que contêm texto
         if df[col].dtype == 'object':
             
-            # 1. Tenta limpar decodificações remanescentes tortas
+            # 1. Correção de Encoding em nível de byte (se a string veio como ISO pura ou CP1252)
             try:
                 df[col] = df[col].apply(lambda x: x.encode('cp1252').decode('utf-8') if isinstance(x, str) else x)
             except:
@@ -99,12 +113,17 @@ def tratar_erros_e_caracteres(df):
                 except:
                     pass
             
-            # 2. Aplica as substituições do nosso dicionário para limpar os '?' do texto
-            for erro, correto in substituicoes_comuns.items():
-                df[col] = df[col].astype(str).str.replace(erro, correto, regex=False)
+            # Converte para string para aplicar as substituições em lote
+            df[col] = df[col].astype(str)
+
+            # 2. Varredura da nossa biblioteca usando Regex (Expressões Regulares)
+            # Isso mata variações como 'rotação', 'inclinação', 'combinação' usando uma regra só
+            for padrao, correto in biblioteca_acentuacao.items():
+                df[col] = df[col].str.replace(padrao, correto, regex=True)
                 
-            # 3. Limpeza de espaços em branco nas pontas
+            # 3. Limpeza de espaços em branco nas pontas e remoção de strings de erro 'nan'
             df[col] = df[col].apply(lambda x: x.strip() if isinstance(x, str) else x)
+            df[col] = df[col].replace('nan', None) # Corrige efeito colateral do astype(str) em nulos
             
             # 4. Inteligência de Data (Converte colunas de data para o formato real)
             if 'data' in col.lower() or 'dt_' in col.lower():
@@ -113,8 +132,9 @@ def tratar_erros_e_caracteres(df):
                 except:
                     pass
 
-    print("✔️ Tratamento de texto e formatação de tipos concluídos!")
+    print("✔️ Varredura da biblioteca de acentuação e limpeza concluídas!")
     return df
+
 
 def converter_arquivos():
     diretorio = r'C:\Users\lucas.barros\OneDrive - BELMICRO TECNOLOGIA SA\Área de Trabalho\Scripts Python'

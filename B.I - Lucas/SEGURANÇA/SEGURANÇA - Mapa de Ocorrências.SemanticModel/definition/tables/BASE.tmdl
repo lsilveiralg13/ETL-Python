@@ -1,0 +1,63 @@
+table BASE
+	lineageTag: eea9cd68-3c97-4065-9456-fc9094bc754e
+
+	column Localidade
+		dataType: string
+		lineageTag: d97f4df4-0c80-4c61-9460-1a2917fd8412
+		summarizeBy: none
+		sourceColumn: Localidade
+
+		annotation SummarizationSetBy = Automatic
+
+	column Data
+		dataType: dateTime
+		formatString: Long Date
+		lineageTag: a131780b-76d9-4802-85df-eae7c5b90abc
+		summarizeBy: none
+		sourceColumn: Data
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation UnderlyingDateTimeDataType = Date
+
+	column 'Mapa de Ocorrências e Riscos'
+		dataType: string
+		lineageTag: 797bfa7a-26ef-49c4-81d7-60246eebb4f2
+		summarizeBy: none
+		sourceColumn: Mapa de Ocorrências e Riscos
+
+		annotation SummarizationSetBy = Automatic
+
+	column QTD
+		dataType: int64
+		formatString: 0
+		lineageTag: 482992ac-a716-4865-b232-9c70487abc54
+		summarizeBy: sum
+		sourceColumn: QTD
+
+		annotation SummarizationSetBy = Automatic
+
+	column Observação
+		dataType: string
+		lineageTag: 2821c7f2-5936-4449-862a-9f2565c04a01
+		summarizeBy: none
+		sourceColumn: Observação
+
+		annotation SummarizationSetBy = Automatic
+
+	partition BASE = m
+		mode: import
+		source =
+				let
+				    Fonte = Excel.Workbook(File.Contents("C:\BASES B.I\SEGURANÇA\Base de Ocorrencias.xlsx"), null, true),
+				    BASE_Sheet = Fonte{[Item="BASE",Kind="Sheet"]}[Data],
+				    #"Cabeçalhos Promovidos" = Table.PromoteHeaders(BASE_Sheet, [PromoteAllScalars=true]),
+				    #"Tipo Alterado" = Table.TransformColumnTypes(#"Cabeçalhos Promovidos",{{"Localidade", type text}, {"Data", type date}, {"Mapa de Ocorrências e Riscos", type text}, {"QTD", Int64.Type}, {"observaçao", type text}}),
+				    #"Colunas Renomeadas" = Table.RenameColumns(#"Tipo Alterado",{{"observaçao", "Observação"}})
+				in
+				    #"Colunas Renomeadas"
+
+	annotation PBI_NavigationStepName = Navegação
+
+	annotation PBI_ResultType = Table
+

@@ -1,0 +1,96 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/report/2.1.0/schema.json",
+  "themeCollection": {
+    "baseTheme": {
+      "name": "blue-swish",
+      "reportVersionAtImport": "5.3",
+      "type": "SharedResources"
+    },
+    "customTheme": {
+      "name": "blue-swish.json",
+      "reportVersionAtImport": "5.4",
+      "type": "RegisteredResources"
+    }
+  },
+  "settings": {
+    "useStylableVisualContainerHeader": true,
+    "defaultFilterActionIsDataFilter": true,
+    "allowChangeFilterTypes": true,
+    "useEnhancedTooltips": true,
+    "useDefaultAggregateDisplayName": true
+  },
+  "objects": {
+    "section": [
+      {
+        "properties": {
+          "verticalAlignment": {
+            "expr": {
+              "Literal": {
+                "Value": "'Top'"
+              }
+            }
+          }
+        }
+      }
+    ]
+  },
+  "resourcePackages": [
+    {
+      "name": "SharedResources",
+      "type": "SharedResources",
+      "items": [
+        {
+          "name": "blue-swish",
+          "path": "BaseThemes/blue-swish.json",
+          "type": "BaseTheme"
+        }
+      ]
+    },
+    {
+      "name": "RegisteredResources",
+      "type": "RegisteredResources",
+      "items": [
+        {
+          "name": "blue-swish.json",
+          "path": "blue-swish.json",
+          "type": "CustomTheme"
+        },
+        {
+          "name": "page-1.svg",
+          "path": "page-1.svg",
+          "type": "Image"
+        },
+        {
+          "name": "page-2.svg",
+          "path": "page-2.svg",
+          "type": "Image"
+        },
+        {
+          "name": "page-4.svg",
+          "path": "page-4.svg",
+          "type": "Image"
+        },
+        {
+          "name": "page-3.svg",
+          "path": "page-3.svg",
+          "type": "Image"
+        },
+        {
+          "name": "page-5.svg",
+          "path": "page-5.svg",
+          "type": "Image"
+        },
+        {
+          "name": "page-6.svg",
+          "path": "page-6.svg",
+          "type": "Image"
+        },
+        {
+          "name": "page-7.svg",
+          "path": "page-7.svg",
+          "type": "Image"
+        }
+      ]
+    }
+  ]
+}

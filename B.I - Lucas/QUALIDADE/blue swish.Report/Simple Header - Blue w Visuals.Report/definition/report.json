@@ -1,0 +1,96 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/report/2.1.0/schema.json",
+  "themeCollection": {
+    "baseTheme": {
+      "name": "Simple-Header---Blue-w-Visuals",
+      "reportVersionAtImport": "5.3",
+      "type": "SharedResources"
+    },
+    "customTheme": {
+      "name": "Simple-Header---Blue-w-Visuals.json",
+      "reportVersionAtImport": "5.4",
+      "type": "RegisteredResources"
+    }
+  },
+  "settings": {
+    "useStylableVisualContainerHeader": true,
+    "defaultFilterActionIsDataFilter": true,
+    "allowChangeFilterTypes": true,
+    "useEnhancedTooltips": true,
+    "useDefaultAggregateDisplayName": true
+  },
+  "objects": {
+    "section": [
+      {
+        "properties": {
+          "verticalAlignment": {
+            "expr": {
+              "Literal": {
+                "Value": "'Top'"
+              }
+            }
+          }
+        }
+      }
+    ]
+  },
+  "resourcePackages": [
+    {
+      "name": "SharedResources",
+      "type": "SharedResources",
+      "items": [
+        {
+          "name": "Simple-Header---Blue-w-Visuals",
+          "path": "BaseThemes/Simple-Header---Blue-w-Visuals.json",
+          "type": "BaseTheme"
+        }
+      ]
+    },
+    {
+      "name": "RegisteredResources",
+      "type": "RegisteredResources",
+      "items": [
+        {
+          "name": "Simple-Header---Blue-w-Visuals.json",
+          "path": "Simple-Header---Blue-w-Visuals.json",
+          "type": "CustomTheme"
+        },
+        {
+          "name": "Overview.svg",
+          "path": "Overview.svg",
+          "type": "Image"
+        },
+        {
+          "name": "Cut-Bottom-Square.svg",
+          "path": "Cut-Bottom-Square.svg",
+          "type": "Image"
+        },
+        {
+          "name": "Cut-Left-Square.svg",
+          "path": "Cut-Left-Square.svg",
+          "type": "Image"
+        },
+        {
+          "name": "Cut-Right-Square.svg",
+          "path": "Cut-Right-Square.svg",
+          "type": "Image"
+        },
+        {
+          "name": "Cut-Bottom-Round.svg",
+          "path": "Cut-Bottom-Round.svg",
+          "type": "Image"
+        },
+        {
+          "name": "Cut-Left-Round.svg",
+          "path": "Cut-Left-Round.svg",
+          "type": "Image"
+        },
+        {
+          "name": "Cut-Right-Round.svg",
+          "path": "Cut-Right-Round.svg",
+          "type": "Image"
+        }
+      ]
+    }
+  ]
+}

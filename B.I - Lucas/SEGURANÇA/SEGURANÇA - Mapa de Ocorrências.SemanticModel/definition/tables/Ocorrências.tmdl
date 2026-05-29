@@ -1,0 +1,95 @@
+table Ocorrências
+	lineageTag: ff3505e4-e5c1-4e6d-8320-6fd217b9de4b
+
+	measure QTDE = SUM('Ocorrências'[QTD])
+		formatString: 0
+		lineageTag: e853529d-7027-4344-93ae-a140d2369c84
+
+	measure QTD_diaAnterior =
+			
+			VAR DataAtual = MAX(Calendario[Date])
+			VAR DataAnteriorComDados =
+			    CALCULATE(
+			        MAX('Ocorrências'[Data]),
+			        FILTER(
+			            ALL(Calendario),
+			            Calendario[Date] < DataAtual &&
+			            CALCULATE([QTDE], Calendario[Date]) > 0
+			        )
+			    )
+			RETURN
+			CALCULATE([QTDE], Calendario[Date] = DataAnteriorComDados)
+		formatString: 0
+		lineageTag: 234bbe35-6b4f-43e8-b627-5ff7bc240c08
+
+	measure Rotulo_Dinamico =
+			
+			VAR vValor = [QTDE] -- Ou a medida que você está usando
+			VAR vTotal = CALCULATE([QTDE], ALLSELECTED() )
+			VAR vPercentual = DIVIDE(vValor, vTotal)
+			RETURN
+			vValor & " (" & FORMAT(vPercentual, "0%") & ")"
+		lineageTag: 3c83780b-3963-4ceb-b86e-83a01a2d14b7
+
+	column Localidade
+		dataType: string
+		lineageTag: 91729400-72da-4b96-9c48-85f07e49062d
+		summarizeBy: none
+		sourceColumn: Localidade
+
+		annotation SummarizationSetBy = Automatic
+
+	column Data
+		dataType: dateTime
+		formatString: dd-mm-yyyy
+		lineageTag: acbd4e4f-96be-418b-9572-5c0a0596fb63
+		summarizeBy: none
+		sourceColumn: Data
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation UnderlyingDateTimeDataType = Date
+
+		annotation PBI_FormatHint = {"isDateTimeCustom":true}
+
+	column 'Mapa de Ocorrências e Riscos'
+		dataType: string
+		lineageTag: b3a663b7-1ca3-4234-8de9-1ad398c976e0
+		summarizeBy: none
+		sourceColumn: Mapa de Ocorrências e Riscos
+
+		annotation SummarizationSetBy = Automatic
+
+	column QTD
+		dataType: int64
+		formatString: 0
+		lineageTag: 0261522f-21de-49c9-a135-9e8bef47bf6a
+		summarizeBy: sum
+		sourceColumn: QTD
+
+		annotation SummarizationSetBy = Automatic
+
+	column Observação
+		dataType: string
+		lineageTag: 45f26026-5ac8-4dc0-b378-0273cadb87e8
+		summarizeBy: none
+		sourceColumn: Observação
+
+		annotation SummarizationSetBy = Automatic
+
+	partition Ocorrências = m
+		mode: import
+		source =
+				let
+				    Fonte = Excel.Workbook(File.Contents("C:\BASES B.I\SEGURANÇA\Base de Ocorrencias.xlsx"), null, true),
+				    BASE_Sheet = Fonte{[Item="BASE",Kind="Sheet"]}[Data],
+				    #"Cabeçalhos Promovidos" = Table.PromoteHeaders(BASE_Sheet, [PromoteAllScalars=true]),
+				    #"Tipo Alterado" = Table.TransformColumnTypes(#"Cabeçalhos Promovidos",{{"Localidade", type text}, {"Data", type date}, {"Mapa de Ocorrências e Riscos", type text}, {"QTD", Int64.Type}, {"observaçao", type text}}),
+				    #"Colunas Renomeadas" = Table.RenameColumns(#"Tipo Alterado",{{"observaçao", "Observação"}})
+				in
+				    #"Colunas Renomeadas"
+
+	annotation PBI_ResultType = Table
+
+	annotation PBI_NavigationStepName = Navegação
+

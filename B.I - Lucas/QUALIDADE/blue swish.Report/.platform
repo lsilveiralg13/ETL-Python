@@ -1,0 +1,11 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+  "metadata": {
+    "type": "Report",
+    "displayName": "blue swish"
+  },
+  "config": {
+    "version": "2.0",
+    "logicalId": "a2ad9d6a-79bf-42f4-9e3b-b32367cfa03b"
+  }
+}

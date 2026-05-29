@@ -1,0 +1,16 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.1.0/schema.json",
+  "name": "clusteredColumnChart89899680041090962",
+  "position": {
+    "x": 572,
+    "y": 372,
+    "width": 643,
+    "height": 289,
+    "z": 0,
+    "tabOrder": 2
+  },
+  "visual": {
+    "visualType": "clusteredColumnChart",
+    "drillFilterOtherVisuals": true
+  }
+}

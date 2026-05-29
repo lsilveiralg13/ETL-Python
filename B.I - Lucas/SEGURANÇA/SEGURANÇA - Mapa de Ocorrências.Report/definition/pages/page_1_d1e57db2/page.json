@@ -1,0 +1,161 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/page/2.1.0/schema.json",
+  "name": "page_1_d1e57db2",
+  "displayName": "BASE",
+  "displayOption": "FitToPage",
+  "height": 720,
+  "width": 1280,
+  "filterConfig": {
+    "filters": [
+      {
+        "name": "52f302a4b82a7946f22d",
+        "field": {
+          "Column": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "Calendario"
+              }
+            },
+            "Property": "Mês Índice Nome"
+          }
+        },
+        "type": "Categorical",
+        "howCreated": "Drillthrough"
+      }
+    ]
+  },
+  "pageBinding": {
+    "name": "9f68955879cb434c3d20",
+    "type": "Drillthrough",
+    "parameters": [
+      {
+        "name": "ada561bdb936408f2850",
+        "boundFilter": "52f302a4b82a7946f22d",
+        "fieldExpr": {
+          "Column": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "Calendario"
+              }
+            },
+            "Property": "Mês Índice Nome"
+          }
+        }
+      }
+    ],
+    "referenceScope": "CrossReport"
+  },
+  "objects": {
+    "background": [
+      {
+        "properties": {
+          "image": {
+            "image": {
+              "name": {
+                "expr": {
+                  "Literal": {
+                    "Value": "'page-1'"
+                  }
+                }
+              },
+              "url": {
+                "expr": {
+                  "ResourcePackageItem": {
+                    "PackageName": "RegisteredResources",
+                    "PackageType": 1,
+                    "ItemName": "page-1.svg"
+                  }
+                }
+              },
+              "scaling": {
+                "expr": {
+                  "Literal": {
+                    "Value": "'Fit'"
+                  }
+                }
+              }
+            }
+          },
+          "transparency": {
+            "expr": {
+              "Literal": {
+                "Value": "0D"
+              }
+            }
+          }
+        }
+      }
+    ],
+    "outspacePane": [
+      {
+        "properties": {
+          "foregroundColor": {
+            "solid": {
+              "color": {
+                "expr": {
+                  "ThemeDataColor": {
+                    "ColorId": 1,
+                    "Percent": 0
+                  }
+                }
+              }
+            }
+          },
+          "fontFamily": {
+            "expr": {
+              "Literal": {
+                "Value": "'Calibri'"
+              }
+            }
+          },
+          "titleSize": {
+            "expr": {
+              "Literal": {
+                "Value": "16L"
+              }
+            }
+          },
+          "borderColor": {
+            "solid": {
+              "color": {
+                "expr": {
+                  "ThemeDataColor": {
+                    "ColorId": 1,
+                    "Percent": 0
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    ]
+  },
+  "visualInteractions": [
+    {
+      "source": "5f049617c21e5dd6b5cb",
+      "target": "6968c38f316877626e1e",
+      "type": "DataFilter"
+    },
+    {
+      "source": "5f049617c21e5dd6b5cb",
+      "target": "hundredPercentStackedBarChart45751434743581883",
+      "type": "DataFilter"
+    },
+    {
+      "source": "5f049617c21e5dd6b5cb",
+      "target": "textbox01545106585430849",
+      "type": "NoFilter"
+    },
+    {
+      "source": "5f049617c21e5dd6b5cb",
+      "target": "b476cd3505f216a19f87",
+      "type": "NoFilter"
+    },
+    {
+      "source": "b1b880c09c075ff63a3b",
+      "target": "c42cdda1f9e02e55a24a",
+      "type": "DataFilter"
+    }
+  ]
+}

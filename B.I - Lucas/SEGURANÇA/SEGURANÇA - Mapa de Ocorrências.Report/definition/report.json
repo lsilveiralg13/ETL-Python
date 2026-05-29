@@ -1,0 +1,97 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/report/3.2.0/schema.json",
+  "themeCollection": {
+    "baseTheme": {
+      "name": "blue-swish",
+      "reportVersionAtImport": {
+        "visual": "1.8.39",
+        "report": "2.0.39",
+        "page": "1.3.39"
+      },
+      "type": "SharedResources"
+    },
+    "customTheme": {
+      "name": "blue-swish.json",
+      "reportVersionAtImport": {
+        "visual": "1.8.40",
+        "report": "2.0.40",
+        "page": "1.3.40"
+      },
+      "type": "RegisteredResources"
+    }
+  },
+  "objects": {
+    "section": [
+      {
+        "properties": {
+          "verticalAlignment": {
+            "expr": {
+              "Literal": {
+                "Value": "'Top'"
+              }
+            }
+          }
+        }
+      }
+    ],
+    "outspacePane": [
+      {
+        "properties": {
+          "expanded": {
+            "expr": {
+              "Literal": {
+                "Value": "false"
+              }
+            }
+          }
+        }
+      }
+    ]
+  },
+  "resourcePackages": [
+    {
+      "name": "SharedResources",
+      "type": "SharedResources",
+      "items": [
+        {
+          "name": "blue-swish",
+          "path": "BaseThemes/blue-swish.json",
+          "type": "BaseTheme"
+        }
+      ]
+    },
+    {
+      "name": "RegisteredResources",
+      "type": "RegisteredResources",
+      "items": [
+        {
+          "name": "blue-swish.json",
+          "path": "blue-swish.json",
+          "type": "CustomTheme"
+        },
+        {
+          "name": "Logo15634950383876978.png",
+          "path": "Logo15634950383876978.png",
+          "type": "Image"
+        },
+        {
+          "name": "page-1.svg",
+          "path": "page-1.svg",
+          "type": "Image"
+        },
+        {
+          "name": "page-2.svg",
+          "path": "page-2.svg",
+          "type": "Image"
+        }
+      ]
+    }
+  ],
+  "settings": {
+    "useStylableVisualContainerHeader": true,
+    "defaultFilterActionIsDataFilter": true,
+    "allowChangeFilterTypes": true,
+    "useEnhancedTooltips": true,
+    "useDefaultAggregateDisplayName": true
+  }
+}

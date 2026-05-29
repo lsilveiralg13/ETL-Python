@@ -1,0 +1,66 @@
+table Ocorrências
+	lineageTag: ff3505e4-e5c1-4e6d-8320-6fd217b9de4b
+
+	column Localidade
+		dataType: string
+		lineageTag: 30653c43-5ea4-4ebf-9ab8-20bb2087631f
+		summarizeBy: none
+		sourceColumn: Localidade
+
+		annotation SummarizationSetBy = Automatic
+
+	column Data
+		dataType: dateTime
+		formatString: Long Date
+		lineageTag: 106f7f1a-2cd7-4f06-b0b3-32f2feec6174
+		summarizeBy: none
+		sourceColumn: Data
+
+		variation Variation
+			isDefault
+			relationship: 3141098e-3e9b-4cca-99d8-8e6c123ba727
+			defaultHierarchy: LocalDateTable_e40b0f8a-4898-406c-8894-cd84334648f3.'Date Hierarchy'
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation UnderlyingDateTimeDataType = Date
+
+	column 'Mapa de Ocorrências e Riscos'
+		dataType: string
+		lineageTag: 5f266cd7-439a-4e06-bc69-30b44ab48325
+		summarizeBy: none
+		sourceColumn: Mapa de Ocorrências e Riscos
+
+		annotation SummarizationSetBy = Automatic
+
+	column QTD
+		dataType: int64
+		formatString: 0
+		lineageTag: b3281b59-35cf-4589-a76b-ce8789532684
+		summarizeBy: sum
+		sourceColumn: QTD
+
+		annotation SummarizationSetBy = Automatic
+
+	column observaçao
+		dataType: string
+		lineageTag: 1dd6c8af-88c9-4b4c-838d-21b0ee1f09a1
+		summarizeBy: none
+		sourceColumn: observaçao
+
+		annotation SummarizationSetBy = Automatic
+
+	partition Ocorrências = m
+		mode: import
+		source =
+				let
+				    Fonte = Excel.Workbook(File.Contents("C:\BASES B.I\SEGURANÇA\Base de Ocorrencias.xlsx"), null, true),
+				    Tabela1_Table = Fonte{[Item="Tabela1",Kind="Table"]}[Data],
+				    #"Tipo Alterado" = Table.TransformColumnTypes(Tabela1_Table,{{"Localidade", type text}, {"Data", type date}, {"Mapa de Ocorrências e Riscos", type text}, {"QTD", Int64.Type}, {"observaçao", type text}})
+				in
+				    #"Tipo Alterado"
+
+	changedProperty = Name
+
+	annotation PBI_ResultType = Exception
+

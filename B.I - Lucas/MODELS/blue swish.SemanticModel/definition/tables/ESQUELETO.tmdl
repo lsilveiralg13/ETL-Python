@@ -1,0 +1,33 @@
+table ESQUELETO
+	lineageTag: cac92a26-28d5-4183-94a7-88822b30e40d
+
+	column 'Mapa de Ocorrências e Riscos'
+		dataType: string
+		lineageTag: 3129e09e-4d7d-4e6a-ae04-e3bb020b6305
+		summarizeBy: none
+		sourceColumn: Mapa de Ocorrências e Riscos
+
+		annotation SummarizationSetBy = Automatic
+
+	column Localidade
+		dataType: string
+		lineageTag: 959b1bf7-2bc9-401b-9313-cbdd95e273b1
+		summarizeBy: none
+		sourceColumn: Localidade
+
+		annotation SummarizationSetBy = Automatic
+
+	partition ESQUELETO = m
+		mode: import
+		source =
+				let
+				    Fonte = Excel.Workbook(File.Contents("C:\BASES B.I\SEGURANÇA\Base de Ocorrencias.xlsx"), null, true),
+				    ESQUELETO_Sheet = Fonte{[Item="ESQUELETO",Kind="Sheet"]}[Data],
+				    #"Cabeçalhos Promovidos" = Table.PromoteHeaders(ESQUELETO_Sheet, [PromoteAllScalars=true]),
+				    #"Tipo Alterado" = Table.TransformColumnTypes(#"Cabeçalhos Promovidos",{{"Mapa de Ocorrências e Riscos", type text}, {"Column2", type any}, {"Localidade", type text}}),
+				    #"Colunas Removidas" = Table.RemoveColumns(#"Tipo Alterado",{"Column2"})
+				in
+				    #"Colunas Removidas"
+
+	annotation PBI_ResultType = Table
+

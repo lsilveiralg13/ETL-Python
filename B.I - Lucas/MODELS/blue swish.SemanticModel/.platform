@@ -1,0 +1,11 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+  "metadata": {
+    "type": "SemanticModel",
+    "displayName": "blue swish"
+  },
+  "config": {
+    "version": "2.0",
+    "logicalId": "6bde738c-9e0d-4f26-99d2-ede53194beed"
+  }
+}

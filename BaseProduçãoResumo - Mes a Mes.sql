@@ -1,66 +1,146 @@
-/* CONSOLIDADO MENSAL DE PRODUÇÃO - 2025 x 2026 */
+WITH 
 
-WITH BASE AS (
+-- ============================================================
+-- 1. PRODUCAO: Quantidade produzida por OP e Produto Acabado
+-- ============================================================
+PRODUCAO AS (
+    SELECT
+        act.OrdemProducao,
+        app.CodProdutoAcabado,
+        SUM(app.QuantidadeApontada) AS Qtd_Produzida
+    FROM producao.fato_apontamento ap
+    INNER JOIN producao.fato_atividade_op act
+        ON ap.CodItemAtividade = act.CodItemAtividade
+    INNER JOIN producao.fato_apontamento_produto app
+        ON ap.CodApontamentoUnico = app.CodApontamentoUnico
+    WHERE app.CodMotivoPerda IS NULL
+    GROUP BY
+        act.OrdemProducao,
+        app.CodProdutoAcabado
+),
 
-    SELECT 
-        YEAR(O.DataNegociacao) AS Ano,
-        MONTH(O.DataNegociacao) AS Mes,
-        SUM(I.QtdNegociada) AS Qtd_Total_na_OP
-    FROM belmicro.fato_operacoes AS O
-    INNER JOIN belmicro.fato_itens AS I 
-        ON O.NumUnicoNota = I.NumUnicoNota
-    INNER JOIN cadastros.dim_produtos AS P 
-        ON I.CodProduto = P.CodProduto
-    INNER JOIN cadastros.dim_grupo_produtos AS G 
-        ON P.CodGrupoProduto = G.CodGrupoProduto
+-- ============================================================
+-- 2. EXPEDICAO: Data de expedição por NumUnicoNota
+-- ============================================================
+EXPEDICAO AS (
+    SELECT
+        NumUnicoNota,
+        MAX(DataExpedicao) AS DataExpedicao
+    FROM belmicro.fato_itens_notas_expedidas
+    GROUP BY NumUnicoNota
+),
 
-    WHERE O.DataNegociacao >= '2025-01-01'
-      AND O.DataNegociacao <= GETDATE()
-      AND O.CodTipoOperacao IN (1102,1119,1607)
-      AND G.NomeGrupoPai IN ('DESKTOP', 'ALL IN ONE', 'MONITORES', 'TV') 
-      AND G.LinhadeNegocio = 'WordPC/Skill'
-
-    GROUP BY 
-        YEAR(O.DataNegociacao),
-        MONTH(O.DataNegociacao)
-
+-- ============================================================
+-- 3. SKU_ATRIBUTOS: Atributos do produto direto da dimensão
+--    SEM depender de fato_operacoes — resolve o problema
+--    de produtos que ainda não têm nota comercial
+-- ============================================================
+SKU_ATRIBUTOS AS (
+    SELECT
+        P.CodProduto,
+        P.DescricaoProduto,
+        P.Marca,
+        P.UsadoComo,
+        GP.NomeGrupoPai      AS Familia,
+        GP.NomeGrupoProduto  AS SubFamilia,
+        GP.LinhaDeNegocio
+    FROM cadastros.dim_produtos P
+    INNER JOIN cadastros.dim_grupo_produtos GP
+        ON P.CodGrupoProduto = GP.CodGrupoProduto
+    WHERE
+        (
+            -- Regra A: WordPC / Comprebel
+            (
+                GP.LinhaDeNegocio IN ('WordPC/Skill', 'Comprebel')
+                AND P.Marca IN (
+                    'HQ', '3GREEN', 'EASYPC',
+                    'SKILL', 'QUANTUM',
+                    'CORPC', 'FOXPC', 'AMD'
+                )
+                AND GP.NomeGrupoPai <> 'COMPONENTES'
+            )
+            OR
+            -- Regra B: Eletrodomésticos HQ / KONKA / 3GREEN
+            (
+                P.Marca IN ('HQ', 'KONKA', '3GREEN')
+                AND GP.NomeGrupoPai IN (
+                    'AR CONDICIONADO', 'FRIGOBAR', 'FORNO',
+                    'NOTEBOOK', 'FRITADEIRA', 'REFRIGERADOR',
+                    'GRILL E SANDUICHEIRAS', 'FREEZER', 'ADEGA',
+                    'COOKTOPS', 'LAVADOURA LOUCAS', 'CERVEJEIRA',
+                    'MAQUINA DE GELO', 'PANELA ELETRICA',
+                    'MONITORES', 'TV', 'MONITOR'
+                )
+            )
+        )
 )
 
+-- ============================================================
+-- RESULTADO FINAL
+-- ============================================================
 SELECT
-    CASE Mes
-        WHEN 1 THEN 'Janeiro'
-        WHEN 2 THEN 'Fevereiro'
-        WHEN 3 THEN 'Março'
-        WHEN 4 THEN 'Abril'
-        WHEN 5 THEN 'Maio'
-        WHEN 6 THEN 'Junho'
-        WHEN 7 THEN 'Julho'
-        WHEN 8 THEN 'Agosto'
-        WHEN 9 THEN 'Setembro'
-        WHEN 10 THEN 'Outubro'
-        WHEN 11 THEN 'Novembro'
-        WHEN 12 THEN 'Dezembro'
-    END AS Mes,
 
-    SUM(CASE WHEN Ano = 2025 THEN Qtd_Total_na_OP ELSE 0 END) AS [2025],
-    SUM(CASE WHEN Ano = 2026 THEN Qtd_Total_na_OP ELSE 0 END) AS [2026]
+    -- Identificadores principais
+    nota.NotaFaturamento                        AS NumeroNota,
+    o.NumUnicoNota,
+    nota.OrdemProducao,
+    opi.CodProdutoAcabado                       AS CodProduto,
 
-FROM BASE
+    -- Descrição e atributos do produto
+    sku.DescricaoProduto,
+    sku.Familia,
+    sku.SubFamilia,
+    sku.Marca                                   AS Fornecedor_Marca,
+    sku.LinhaDeNegocio                          AS LinhaDeProduto,
+    sku.UsadoComo,
 
-GROUP BY Mes
+    -- Quantidades
+    opi.QuantidadeOriginalSemAjuste             AS Qtd_OP_Planejada,
+    COALESCE(prod.Qtd_Produzida, 0)             AS Qtd_Produzida,
 
-ORDER BY 
-    CASE Mes
-        WHEN 1 THEN 1
-        WHEN 2 THEN 2
-        WHEN 3 THEN 3
-        WHEN 4 THEN 4
-        WHEN 5 THEN 5
-        WHEN 6 THEN 6
-        WHEN 7 THEN 7
-        WHEN 8 THEN 8
-        WHEN 9 THEN 9
-        WHEN 10 THEN 10
-        WHEN 11 THEN 11
-        WHEN 12 THEN 12
-    END;
+    -- Datas
+    CAST(op.DataHoraInclusao    AS DATE)        AS Data_Producao,
+    CAST(op.DataHoraFinalizacao AS DATE)        AS Data_Finalizacao,
+    CAST(o.DataNegociacao       AS DATE)        AS Data_Negociacao,
+    CAST(exp.DataExpedicao      AS DATE)        AS Data_Expedicao,
+
+    -- Informações adicionais da nota
+    o.NumNota,
+    o.StatusNota,
+    o.LinhaDeNegocio                            AS LinhaDeNegocio_NF
+
+FROM producao.fato_instancia_item_nota nota
+
+-- OP → detalhes da Ordem de Produção
+INNER JOIN producao.fato_ordem_producao op
+    ON nota.OrdemProducao = op.OrdemProducao
+
+-- OP → itens (produto acabado planejado)
+INNER JOIN producao.fato_ordem_producao_item opi
+    ON op.OrdemProducao = opi.OrdemProducao
+
+-- OP → quantidades efetivamente produzidas
+LEFT JOIN PRODUCAO prod
+    ON op.OrdemProducao         = prod.OrdemProducao
+   AND opi.CodProdutoAcabado    = prod.CodProdutoAcabado
+
+-- Nota → dados comerciais (operação/NF)
+LEFT JOIN belmicro.fato_operacoes o
+    ON nota.NotaFaturamento = o.NumUnicoNota
+
+-- Nota → data de expedição
+LEFT JOIN EXPEDICAO exp
+    ON nota.NotaFaturamento = exp.NumUnicoNota
+
+-- Produto → atributos (join direto na dimensão, sem depender de nota)
+INNER JOIN SKU_ATRIBUTOS sku
+    ON opi.CodProdutoAcabado = sku.CodProduto
+
+WHERE
+    op.DataHoraInclusao >= '2025-01-01'
+    AND op.DataHoraInclusao <= GETDATE()
+
+ORDER BY
+    Data_Producao   DESC,
+    nota.OrdemProducao,
+    opi.CodProdutoAcabado;
