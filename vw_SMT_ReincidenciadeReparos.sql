@@ -1,1 +1,0 @@
-SELECT * FROM belmicro.vw_reincidencia_reparos;

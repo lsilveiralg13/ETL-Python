@@ -1,28 +1,26 @@
 SELECT 
+    TABLE_SCHEMA AS [Schema],
     TABLE_NAME AS [Nome da Tabela],
     COLUMN_NAME AS [Nome da Coluna],
     DATA_TYPE AS [Tipo de Dados],
     ORDINAL_POSITION AS [Ordem]
-FROM 
-    INFORMATION_SCHEMA.COLUMNS
-WHERE 
-    TABLE_NAME IN (
-        'dim_alocacao_posto_trabaho', -- Nota: verifique se há um 'l' faltando em 'trabalho' no seu banco físico, na imagem parece grafado assim.
-        'dim_configuracao_atividade',
-        'dim_planta_manufatura',
-        'dim_posto_trabalho',
-        'dim_processo_producao',
-        'fato_apontamento',
-        'fato_apontamento_produto',
-        'fato_atividade_op',
-        'fato_controle_apontamento',
-        'fato_historico_status_serie',
-        'fato_instancia_item_nota',
-        'fato_ordem_producao',
-        'fato_ordem_producao_item',
-        'fato_produto_seriepa',
-        'fato_rastreabilidade_serie_mp'
+FROM INFORMATION_SCHEMA.COLUMNS
+WHERE TABLE_SCHEMA = 'producao'
+  AND TABLE_NAME IN (
+        'fato_ordem_producao_ciclo_seriemp',
+		'fato_ordem_producao_seriepa_ciclo',
+		'dim_produto_receita_componente',
+		'fato_ordem_producao_separacao_item',
+		'fato_ordem_producao_separacao_cabecalho',
+		'fato_materia_prima_serie',
+		'dim_posto_trabalho_old',
+		'fato_apontamento_produto_old',
+		'fato_apontamento_old',
+		'dim_processo_producao_old',
+		'dim_planta_manufatura_old',
+		'dim_configuracao_atividade_old',
+		'dim_alocacao_posto_trabalho_old'
     )
-ORDER BY 
-    TABLE_NAME, 
+ORDER BY
+    TABLE_NAME,
     ORDINAL_POSITION;
