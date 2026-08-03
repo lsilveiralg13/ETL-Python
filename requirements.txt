@@ -1,174 +1,304 @@
-# ==============================================================================
-# 📊 1. MANIPULAÇÃO DE DADOS, ETLS E COMPUTAÇÃO CIENTÍFICA
-# ==============================================================================
-pandas
-numpy
-scipy
-statsmodels
-sympy
-polars>=1.0.0               # 🔥 Alternativa ultra rápida ao Pandas para grandes volumes
-pyarrow                     # Suporte para arquivos Parquet eficientes
-dill
-joblib
-tqdm                        # Barras de progresso para loops de dados
-
-# ==============================================================================
-# 🗄️ 2. BANCO DE DADOS, ORMS E CONECTORES (Queries, DMs e Procedures)
-# ==============================================================================
-SQLAlchemy
-SQLAlchemy-JSONField
-SQLAlchemy-Utils
-sqlparse
-alembic                     # Controle de versão de schemas de banco
-PyMySQL
-mysql-connector-python
-pyodbc                      # Conexão nativa com SQL Server corporativo
-psycopg2-binary>=2.9.0      # Conector robusto para PostgreSQL
-
-# ==============================================================================
-# 📈 3. DASHBOARDS, VISUALIZAÇÃO DE DADOS E RELATÓRIOS
-# ==============================================================================
-streamlit
-altair
-plotly
-plotly-express
-dash
-dash-bootstrap-components
-matplotlib
-seaborn
-folium                      # Mapas interativos excelentes para logística
-geopy                       # Cálculo de distâncias e geocodificação
-branca
-panel>=1.4.0                # Apps de dados complexos concorrente do Streamlit
-
-# ==============================================================================
-# 🧾 4. MANIPULAÇÃO DE EXCEL E DOCUMENTOS OFFICE
-# ==============================================================================
-openpyxl
-XlsxWriter
-xlwings
-python-pptx
-et_xmlfile
-
-# ==============================================================================
-# 🔮 5. MACHINE LEARNING, PREVISÕES E DATA SCIENCE
-# ==============================================================================
-scikit-learn
-scikit-image
-prophet                     # Previsões de séries temporais (Vendas e SLAs)
-cmdstanpy
-stanio
-patsy
-networkx
-xgboost>=2.0.0              # Algoritmo de altíssima performance para previsões
-lightgbm>=4.0.0             # Modelo preditivo leve e rápido em memória
-
-# ==============================================================================
-# 🤖 6. AUTOMAÇÃO WEB (SCRAPING) E PROCESSAMENTO DE IMAGENS/OCR
-# ==============================================================================
-selenium
-webdriver-manager            # Gerencia drivers do Chrome/Edge automaticamente
-beautifulsoup4
-soupsieve
-Scrapy
-urllib3
-requests
-requests-file
-requests-toolbelt
-httpx
-aiohttp
-lxml
-parsel
-selectolax
-tldextract
-w3lib
-Pillow
-easyocr
-pytesseract                 # Engine OCR (Excelente para extrair dados de PDFs/Imagens)
-opencv-python-headless
-
-# ==============================================================================
-# 🖥️ 7. AUTOMAÇÃO DE SISTEMAS, RPA E INTERACTION (Desktop/OS)
-# ==============================================================================
-PyAutoGUI                   # Controle de mouse e teclado para sistemas sem API
-PyGetWindow                 # Gerenciamento de janelas ativas no Windows
-PyRect
-PyScreeze
-PyMsgBox
-pyperclip                   # Controle programático do Clipboard (Ctrl+C / Ctrl+V)
-MouseInfo
-pytweening
-pywin32                     # Integração profunda com a API do Windows
-pywin32-ctypes
-watchdog                    # Monitoramento de pastas em tempo real (ETL Automático)
-
-# ==============================================================================
-# 🚀 8. BIG DATA & AGENDAMENTO DE TAREFAS (Data Engineering)
-# ==============================================================================
-pyspark                     # Processamento de dados massivos
-py4j
-apache-airflow-providers-common-sql
-apache-airflow-providers-ftp
-apache-airflow-providers-http
-apache-airflow-providers-imap
-apache-airflow-providers-sqlite
-croniter
-cron-descriptor
-
-# ==============================================================================
-# 🌐 9. DESENVOLVIMENTO DE APIS E SERVIDORES WEB (Integração de Modelos)
-# ==============================================================================
-Flask
-Flask-AppBuilder
-Flask-Babel
-Flask-Caching
-Flask-JWT-Extended
-Flask-Limiter
-Flask-Login
-Flask-Session
-Flask-SQLAlchemy
-Flask-WTF
-fastapi                     # API moderna de altíssima performance para dados
-pydantic                    # Validação de dados robusta com tipagem pura
-pydantic_core
-uvicorn>=0.30.0             # Servidor web assíncrono para o FastAPI
-gunicorn
-starlette
-asgiref
-a2wsgi
-Werkzeug
-itsdangerous
-Jinja2
-MarkupSafe
-
-# ==============================================================================
-# 🛠️ 10. INTEGRAÇÃO DE APIS EXTERNAS E AUXILIARES (IBGE, Whatsapp, Google)
-# ==============================================================================
-sidrapy                     # Consumo direto da API do IBGE (SIDRA)
-pywhatkit                   # Automação de alertas de relatórios via WhatsApp
-googlemaps                  # Rotas e geocodificação do Google
-GitPython
-gitdb
-python-dotenv               # Gerenciamento de credenciais de bancos em .env
-
-# ==============================================================================
-# 🪵 11. FORMATATAÇÃO DE TERMINAL, LOGS E PROSE
-# ==============================================================================
-rich
-rich-argparse
-colorama
-colorlog
-python-dateutil
-python-slugify
-pytz
-tzdata
-holidays                    # Essencial para calcular SLAs descontando feriados
-Unidecode
-text-unidecode
-
-# ==============================================================================
-# 🧠 12. DEEP LEARNING (IA e Tensores)
-# ==============================================================================
-torch
-torchvision
-ninja
+a2wsgi==1.10.10
+aiohappyeyeballs==2.6.2
+aiohttp==3.13.5
+aiosignal==1.4.0
+aiosmtplib==5.1.0
+aiosqlite==0.21.0
+alembic==1.18.4
+altair==6.1.0
+annotated-doc==0.0.4
+annotated-types==0.7.0
+anyio==4.13.0
+apache-airflow==3.2.2
+apache-airflow-core==3.2.2
+apache-airflow-providers-common-compat==1.15.0
+apache-airflow-providers-common-io==1.7.2
+apache-airflow-providers-common-sql==2.0.0
+apache-airflow-providers-ftp==3.15.0
+apache-airflow-providers-http==6.0.2
+apache-airflow-providers-imap==3.11.3
+apache-airflow-providers-smtp==3.0.1
+apache-airflow-providers-sqlite==4.3.2
+apache-airflow-providers-standard==1.13.1
+apache-airflow-task-sdk==1.2.2
+apispec==6.10.0
+argcomplete==3.6.3
+asgiref==3.11.1
+attrs==26.1.0
+Automat==25.4.16
+babel==2.18.0
+beautifulsoup4==4.14.3
+blinker==1.9.0
+bokeh==3.9.0
+branca==0.8.2
+cachelib==0.14.0
+cachetools==7.1.4
+cadwyn==6.2.2
+certifi==2026.5.20
+cffi==2.0.0
+charset-normalizer==3.4.7
+click==8.4.1
+cmdstanpy==1.3.0
+colorama==0.4.6
+colorlog==6.10.1
+constantly==23.10.4
+contourpy==1.3.3
+cron_descriptor==2.0.8
+croniter==6.2.2
+cryptography==48.0.0
+cssselect==1.4.0
+cycler==0.12.1
+dash==4.1.0
+dash-bootstrap-components==2.0.4
+defusedxml==0.7.1
+Deprecated==1.3.1
+dill==0.4.1
+distro==1.9.0
+dnspython==2.8.0
+easyocr==1.7.2
+email-validator==2.3.0
+et_xmlfile==2.0.0
+fastapi==0.136.3
+fastapi-cli==0.0.24
+filelock==3.29.0
+Flask==3.1.3
+flask-appbuilder==5.2.1
+flask-babel==4.0.0
+Flask-Caching==2.4.0
+Flask-JWT-Extended==4.7.4
+Flask-Limiter==3.12
+Flask-Login==0.6.3
+Flask-Session==0.8.0
+Flask-SQLAlchemy==3.1.1
+Flask-WTF==1.3.0
+folium==0.20.0
+fonttools==4.63.0
+frozenlist==1.8.0
+fsspec==2026.4.0
+geographiclib==2.1
+geopy==2.4.1
+gitdb==4.0.12
+GitPython==3.1.50
+google-auth==2.56.2
+google-genai==2.14.0
+googleapis-common-protos==1.75.0
+googlemaps==4.10.0
+greenback==1.3.0
+greenlet==3.5.1
+grpcio==1.80.0
+gunicorn==26.0.0
+h11==0.16.0
+holidays==0.97
+httpcore==1.0.9
+httptools==0.8.0
+httpx==0.28.1
+hyperlink==21.0.0
+idna==3.17
+ImageIO==2.37.3
+importlib_metadata==9.0.0
+importlib_resources==7.1.0
+Incremental==24.11.0
+itemadapter==0.13.1
+itemloaders==1.4.0
+itsdangerous==2.2.0
+Jinja2==3.1.6
+jmespath==1.1.0
+joblib==1.5.3
+jsonschema==4.26.0
+jsonschema-specifications==2025.9.1
+kiwisolver==1.5.0
+lazy-loader==0.5
+lazy-object-proxy==1.12.0
+libcst==1.8.6
+lightgbm==4.6.0
+limits==5.8.0
+linkify-it-py==2.1.0
+lockfile==0.12.2
+lxml==6.1.1
+Mako==1.3.12
+Markdown==3.10.2
+markdown-it-py==4.2.0
+MarkupSafe==3.0.3
+marshmallow==4.3.0
+marshmallow-sqlalchemy==1.5.0
+matplotlib==3.10.9
+mdit-py-plugins==0.6.1
+mdurl==0.1.2
+methodtools==0.4.7
+more-itertools==11.1.0
+MouseInfo==0.1.3
+mpmath==1.3.0
+msgspec==0.21.1
+multidict==6.7.1
+mysql-connector-python==9.7.0
+narwhals==2.21.2
+natsort==8.4.0
+nest-asyncio==1.6.0
+networkx==3.6.1
+nh3==0.3.5
+ninja==1.13.0
+numpy==2.4.6
+opencv-python-headless==4.13.0.92
+openpyxl==3.1.5
+opentelemetry-api==1.42.1
+opentelemetry-exporter-otlp==1.42.1
+opentelemetry-exporter-otlp-proto-common==1.42.1
+opentelemetry-exporter-otlp-proto-grpc==1.42.1
+opentelemetry-exporter-otlp-proto-http==1.42.1
+opentelemetry-proto==1.42.1
+opentelemetry-sdk==1.42.1
+opentelemetry-semantic-conventions==0.63b1
+ordered-set==4.1.0
+outcome==1.3.0.post0
+packaging==26.2
+pandas==3.0.3
+panel==1.9.2
+panel-material-ui==0.11.2
+param==2.4.0
+parsel==1.11.0
+pathlib_abc==0.5.2
+pathspec==1.1.1
+patsy==1.0.2
+pendulum==3.2.0
+pillow==12.2.0
+pip==26.2
+pip==26.1.1
+playwright==1.60.0
+plotly==6.7.0
+plotly-express==0.4.1
+pluggy==1.6.0
+polars==1.41.2
+polars-runtime-32==1.41.2
+prison==0.2.1
+propcache==0.5.2
+prophet==1.3.0
+Protego==0.6.0
+protobuf==6.33.6
+psutil==7.2.2
+psycopg2-binary==2.9.12
+py4j==0.10.9.9
+pyarrow==24.0.0
+pyasn1==0.6.4
+pyasn1_modules==0.4.2
+PyAutoGUI==0.9.54
+pyclipper==1.4.0
+pycparser==3.0
+pydantic==2.13.4
+pydantic-extra-types==2.11.1
+pydantic-settings==2.14.1
+pydantic_core==2.46.4
+pydeck==0.9.2
+PyDispatcher==2.0.7
+pyee==13.0.1
+PyGetWindow==0.0.9
+Pygments==2.20.0
+pygtrie==2.5.0
+PyJWT==2.13.0
+PyMsgBox==2.0.1
+PyMySQL==1.2.0
+pyodbc==5.3.0
+pyOpenSSL==26.2.0
+pyparsing==3.3.2
+pyperclip==1.11.0
+PyRect==0.2.0
+PyScreeze==1.0.1
+PySocks==1.7.1
+pyspark==4.1.2
+pytesseract==0.3.13
+python-bidi==0.6.10
+python-daemon==3.1.2
+python-dateutil==2.9.0.post0
+python-dotenv==1.2.2
+python-multipart==0.0.29
+python-pptx==1.0.2
+python-slugify==8.0.4
+pytweening==1.2.0
+pytz==2026.2
+pyviz_comms==3.0.6
+pywhatkit==5.4
+pywin32==311
+pywin32-ctypes==0.2.3
+PyYAML==6.0.3
+queuelib==1.9.0
+referencing==0.37.0
+requests==2.34.2
+requests-file==3.0.1
+requests-toolbelt==1.0.0
+retrying==1.4.2
+rich==13.9.4
+rich-argparse==1.8.0
+rich-toolkit==0.19.10
+rpds-py==2026.5.1
+scikit-image==0.26.0
+scikit-learn==1.8.0
+scipy==1.17.1
+Scrapy==2.16.0
+seaborn==0.13.2
+selectolax==0.4.10
+selenium==4.44.0
+service-identity==26.1.0
+setproctitle==1.3.7
+setuptools==81.0.0
+shapely==2.1.2
+shellingham==1.5.4
+sidrapy==0.1.4
+six==1.17.0
+smmap==5.0.3
+sniffio==1.3.1
+sortedcontainers==2.4.0
+soupsieve==2.8.4
+SQLAlchemy==2.0.50
+SQLAlchemy-JSONField==1.0.3
+SQLAlchemy-Utils==0.42.1
+sqlparse==0.5.5
+stanio==0.5.1
+starlette==1.2.0
+statsmodels==0.14.6
+streamlit==1.58.0
+structlog==25.5.0
+svcs==25.1.0
+sympy==1.14.0
+tabulate==0.10.0
+tenacity==9.1.4
+termcolor==3.3.0
+text-unidecode==1.3
+threadpoolctl==3.6.0
+tifffile==2026.5.15
+tldextract==5.3.1
+toml==0.10.2
+torch==2.12.0
+torchvision==0.27.0
+tornado==6.5.6
+tqdm==4.67.3
+trio==0.33.0
+trio-websocket==0.12.2
+Twisted==26.4.0
+typer==0.26.4
+typing-inspection==0.4.2
+typing_extensions==4.15.0
+tzdata==2026.2
+uc-micro-py==2.0.0
+Unidecode==1.4.0
+universal_pathlib==0.3.10
+urllib3==2.7.0
+uuid6==2025.0.1
+uvicorn==0.48.0
+w3lib==2.4.1
+watchdog==6.0.0
+watchfiles==1.2.0
+webdriver-manager==4.1.1
+websocket-client==1.9.0
+websockets==16.0
+Werkzeug==3.1.8
+wikipedia==1.4.0
+wirerope==1.0.0
+wrapt==2.2.1
+wsproto==1.3.2
+WTForms==3.2.2
+xgboost==3.2.0
+xlsxwriter==3.2.9
+xlwings==0.35.3
+xyzservices==2026.3.0
+yarl==1.24.2
+zipp==4.1.0
+zope.interface==8.5
