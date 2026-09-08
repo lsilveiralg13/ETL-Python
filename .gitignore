@@ -11,3 +11,9 @@ IMAGENS/
 __pycache__/
 
 desktop.ini
+
+# Databricks SQL assets não suportados pelo Git Folders
+SQL - Databricks/vw_clisp_sla_producao_manaus
+SQL - Databricks/vw_producaoSMDcomapontamento
+SQL - Databricks/vw_relatorio_expedicao
+SQL - Databricks/vw_relatorio_expedicao_manaus
