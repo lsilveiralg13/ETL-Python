@@ -11,3 +11,8 @@ IMAGENS/
 __pycache__/
 
 desktop.ini
+
+tarefas.db
+.venv/
+venv/
+.streamlit/
