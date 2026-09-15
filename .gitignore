@@ -24,3 +24,5 @@ SQL - Databricks/vw_clisp_sla_producao_manaus
 SQL - Databricks/vw_producaoSMDcomapontamento
 SQL - Databricks/vw_relatorio_expedicao
 SQL - Databricks/vw_relatorio_expedicao_manaus
+client_secret.json
+*.db
