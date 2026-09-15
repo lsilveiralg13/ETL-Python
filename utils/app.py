@@ -1,15 +1,36 @@
 import streamlit as st
+import sqlite3
+import pandas as pd
+from datetime import date, datetime
 
-st.set_page_config(page_title="Simulador Previdenciário", layout="wide")
+st.set_page_config(page_title="P.O de Tarefas - Análise de Dados", layout="wide")
 
-st.title("🛡️ Simulador de Aposentadoria e Regras de Transição")
+## BANCO DE DADOS ATIVO ##
+def get_connection():
+    return sqlite3.connect("tarefas.db", check_same_thread=False)
 
-# Upload do CNIS
-uploaded_file = st.sidebar.file_uploader("Suba o PDF do CNIS", type=["pdf"])
+def init_db():
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS tarefas (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            Demanda TEXT NOT NULL,
+            Projeto_Area TEXT,
+            Prioridade TEXT NOT NULL,
+            Prazo DATE NOT NULL,
+            Estimativa TEXT,
+            Observacoes TEXT,
+            Status TEXT NOT NULL,
+            Data_Criacao DATETIME NOT NULL,
+            Data_Conclusao DATETIME NOT NULL
+        )
+    """)
+    conn.commit()
 
-if uploaded_file:
-    st.success("CNIS carregado com sucesso!")
+    init_db()
 
-# Renderiza a tabela de cenários calculados pelo motor
-df_cenarios = motor.consolidar_cenarios()
-st.dataframe(df_cenarios, use_container_width=True)
+    def render_form_demanda(key_prefix:"form")
+        with st.form(f"{key_prefix}_nova_demanda", clear_on_submit=True):
+            st.markdown("### Nova Demanda")
+            st.markdown("Preencha os campos abaixo para adicionar uma nova demanda ao P.O de Tarefas.")
