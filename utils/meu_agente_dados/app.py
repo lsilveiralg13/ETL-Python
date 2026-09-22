@@ -1,6 +1,7 @@
 import os
 import sys
 import json
+import io
 import asyncio
 import concurrent.futures
 from datetime import datetime
@@ -37,8 +38,8 @@ MODELOS_PREFERENCIA = [
 
 # Catálogo completo das ferramentas expostas pelo servidor MCP (incluindo RAG e SQL AST)
 CATALOGO_FERRAMENTAS = [
-    {"nome": "validar_e_executar_sql", "descricao": "Valida via AST e executa SELECTs seguros"},
-    {"nome": "buscar_conhecimento_rag", "descricao": "Busca vetorial/semântica no Qdrant Cloud"},
+    {"nome": "validar_e_executar_sql", "descricao": "Valida via AST e Schema-Aware antes de rodar"},
+    {"nome": "buscar_conhecimento_rag", "descricao": "Busca vetorial/semântica no Qdrant Cloud com Cache"},
     {"nome": "indexar_documento_com_chunking", "descricao": "Chunking + Ingestão no Qdrant Cloud"},
     {"nome": "listar_esquemas_e_tabelas", "descricao": "Lista tabelas e visões do ambiente"},
     {"nome": "descrever_estrutura_tabela", "descricao": "Traz DDL, colunas e tipos de uma tabela"},
@@ -226,7 +227,7 @@ st.markdown(
 )
 
 # =============================================================================
-# ESTADO DE SESSÃO & MEMÓRIA (INICIALIZAÇÃO SEGURA)
+# ESTADO DE SESSÃO & MEMÓRIA
 # =============================================================================
 if "messages" not in st.session_state:
     st.session_state.messages = [
@@ -335,7 +336,7 @@ with st.sidebar:
             <div class="vt-tool-row"><span class="vt-tool-desc">Último modelo usado</span></div>
             <div class="vt-tool-name" style="font-size:0.82rem;">{modelo_label}</div>
             <div class="vt-tool-row" style="margin-top:6px;"><span class="vt-tool-desc">Chamadas MCP</span></div>
-            <div style="font-family:'Space Grotesk',sans-serif;font-size:1.1rem;margin-top:2px;">{st.session_state.total_chamadas_mcp}</div>
+            <div style="font-family:'Space Grotesk',sans-serif;font-size:1.1rem;margin:2px;font-weight:600;">{st.session_state.total_chamadas_mcp}</div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -395,6 +396,34 @@ def obter_schema_tool(tool):
     return {"type": "object", "properties": {}}
 
 
+def extrair_texto_da_resposta(response):
+    """Extrai exaustivamente qualquer texto retornado na resposta da Gemini API."""
+    partes_texto = []
+
+    # 1. Tenta acessar a propriedade .text nativa
+    try:
+        if hasattr(response, "text") and response.text:
+            partes_texto.append(response.text)
+    except Exception:
+        pass
+
+    # 2. Varre candidates -> content -> parts
+    if hasattr(response, "candidates") and response.candidates:
+        for cand in response.candidates:
+            if hasattr(cand, "content") and cand.content and hasattr(cand.content, "parts"):
+                for part in cand.content.parts:
+                    if hasattr(part, "text") and part.text:
+                        partes_texto.append(part.text)
+
+    # Remove duplicadas mantendo ordem
+    resultado_limpo = []
+    for txt in partes_texto:
+        if txt and txt not in resultado_limpo:
+            resultado_limpo.append(txt)
+
+    return "\n".join(resultado_limpo).strip()
+
+
 def chamar_gemini_com_fallback(client, contents, config):
     ultimo_erro = None
     for modelo in MODELOS_PREFERENCIA:
@@ -422,12 +451,14 @@ def chamar_gemini_com_fallback(client, contents, config):
 # PROCESSAMENTO PRINCIPAL (MCP + GEMINI)
 # =============================================================================
 async def processar_mcp_e_llm(prompt_usuario, historico_mensagens, dialeto_sql):
-    if not os.environ.get("GEMINI_API_KEY"):
-        return "⚠️ Erro: A variável de ambiente GEMINI_API_KEY não foi configurada. Defina-a no seu arquivo .bat ou terminal.", None, False, None
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        return "⚠️ Erro: A variável de ambiente GEMINI_API_KEY não foi configurada. Defina-a no seu arquivo .env ou terminal.", None, False, None
 
     env_vars = dict(os.environ)
     env_vars["PYTHONUNBUFFERED"] = "1"
     env_vars["PYTHONIOENCODING"] = "utf-8"
+    env_vars["GEMINI_API_KEY"] = api_key
 
     server_params = StdioServerParameters(
         command=sys.executable,
@@ -465,18 +496,21 @@ async def processar_mcp_e_llm(prompt_usuario, historico_mensagens, dialeto_sql):
                         )
                     )
 
-                client = genai.Client()
+                client = genai.Client(api_key=api_key)
 
                 system_instruction = f"""
-                Você é um especialista consultivo em engenharia de dados, business intelligence, RAG e SQL.
+                Você é o Vetra, um especialista consultivo em engenharia de dados, business intelligence, RAG e SQL.
                 Sua função é ajudar o usuário a entender seus esquemas de banco de dados, criar queries eficientes,
                 validar regras de negócio e realizar análises de performance.
                 O dialeto SQL preferido do usuário é: {dialeto_sql}.
-                Sempre utilize as ferramentas MCP disponíveis para consultar a base RAG, esquemas, regras ou executar queries antes de responder.
+                Sempre responda de forma clara e explicativa. Caso utilize ferramentas MCP para buscar informações, integre as respostas dessas ferramentas na sua explicação final para o usuário.
                 """
 
+                # Trimming de contexto: mantém apenas as últimas 10 mensagens para economizar tokens e acelerar chamadas
+                historico_recente = historico_mensagens[-10:] if len(historico_mensagens) > 10 else historico_mensagens
+
                 contents = []
-                for m in historico_mensagens:
+                for m in historico_recente:
                     role = "user" if m["role"] == "user" else "model"
                     contents.append(
                         types.Content(
@@ -493,8 +527,12 @@ async def processar_mcp_e_llm(prompt_usuario, historico_mensagens, dialeto_sql):
 
                 response, modelo_usado = chamar_gemini_com_fallback(client, contents, config)
 
-                # Loop para lidar com chamadas repetidas ou encadeadas de ferramentas
-                while response.function_calls:
+                # Prevenção de loop infinito: máximo de 5 iterações MCP por mensagem
+                MAX_PASSOS_MCP = 5
+                passo_atual = 0
+
+                while response.function_calls and passo_atual < MAX_PASSOS_MCP:
+                    passo_atual += 1
                     function_call = response.function_calls[0]
                     tool_name = function_call.name
                     tool_args = dict(function_call.args) if function_call.args else {}
@@ -504,12 +542,18 @@ async def processar_mcp_e_llm(prompt_usuario, historico_mensagens, dialeto_sql):
                             st.markdown("**Argumentos**")
                             st.code(json.dumps(tool_args, ensure_ascii=False, indent=2), language="json")
 
-                        resultado_mcp = await session.call_tool(tool_name, tool_args)
-
-                        if resultado_mcp.content and len(resultado_mcp.content) > 0:
-                            conteudo_retorno = resultado_mcp.content[0].text
-                        else:
-                            conteudo_retorno = "Ferramenta executada, porém sem retorno de texto."
+                        # Timeout de segurança de 30 segundos nas chamadas de ferramentas MCP
+                        try:
+                            resultado_mcp = await asyncio.wait_for(
+                                session.call_tool(tool_name, tool_args),
+                                timeout=30.0
+                            )
+                            if resultado_mcp.content and len(resultado_mcp.content) > 0:
+                                conteudo_retorno = resultado_mcp.content[0].text
+                            else:
+                                conteudo_retorno = "Ferramenta executada, porém sem retorno de texto."
+                        except asyncio.TimeoutError:
+                            conteudo_retorno = "⚠️ Erro: A ferramenta MCP excedeu o tempo limite de resposta (30s)."
 
                         st.markdown("**Retorno**")
                         st.code(conteudo_retorno, language="text")
@@ -533,17 +577,12 @@ async def processar_mcp_e_llm(prompt_usuario, historico_mensagens, dialeto_sql):
 
                     response, modelo_usado = chamar_gemini_com_fallback(client, contents, config)
 
-                # Extração consistente do texto final
-                texto_extraido = ""
-                if response.candidates and response.candidates[0].content and response.candidates[0].content.parts:
-                    for part in response.candidates[0].content.parts:
-                        if hasattr(part, "text") and part.text:
-                            texto_extraido += part.text
-
-                texto_final = texto_extraido.strip() if texto_extraido.strip() else (response.text or "")
+                texto_final = extrair_texto_da_resposta(response)
                 
-                if not texto_final:
-                    texto_final = "Não foi possível extrair o texto da resposta do modelo, mas a operação foi finalizada com sucesso."
+                if not texto_final and conteudo_retorno:
+                    texto_final = f"Consulta finalizada com sucesso. Dados obtidos:\n\n{conteudo_retorno}"
+                elif not texto_final:
+                    texto_final = "Operação realizada com sucesso."
 
                 return texto_final, modelo_usado, mcp_chamado, conteudo_retorno
 
@@ -615,22 +654,67 @@ if prompt:
             if modelo_usado:
                 st.caption(f"Respondido por `{modelo_usado}` · {datetime.now().strftime('%H:%M')}")
 
-            # RENDERIZAÇÃO DE TABELAS E GRÁFICOS PLOTLY
+            # RENDERIZAÇÃO DE TABELAS, SELETOR DE GRÁFICOS E EXPORTAÇÃO
             if retorno_mcp and "```json" in retorno_mcp:
                 try:
                     json_str = retorno_mcp.split("```json")[1].split("```")[0].strip()
                     dados = json.loads(json_str)
-                    df = pd.DataFrame(dados["linhas"], columns=dados["colunas"])
                     
-                    st.markdown("#### 📊 Resultado dos Dados")
-                    col_df, col_chart = st.columns([1, 1])
-                    with col_df:
-                        st.dataframe(df, use_container_width=True)
-                    with col_chart:
-                        fig = px.bar(df, x=df.columns[0], y=df.columns[1], title="Desempenho da Consulta")
-                        st.plotly_chart(fig, use_container_width=True)
-                except Exception:
-                    pass
+                    if isinstance(dados, dict) and "linhas" in dados and "colunas" in dados:
+                        df = pd.DataFrame(dados["linhas"], columns=dados["colunas"])
+                        
+                        st.markdown("---")
+                        st.markdown("#### 📊 Painel de Análise e Visualização de Dados")
+                        
+                        col_df, col_chart = st.columns([1, 1])
+                        with col_df:
+                            st.dataframe(df, use_container_width=True)
+                            
+                            # CENTRAL DE EXPORTAÇÃO DE RELATÓRIOS (Excel / CSV)
+                            st.markdown("##### 📥 Exportar Resultados")
+                            c_exp1, c_exp2 = st.columns(2)
+                            
+                            buffer_excel = io.BytesIO()
+                            with pd.ExcelWriter(buffer_excel, engine='openpyxl') as writer:
+                                df.to_excel(writer, index=False, sheet_name='Resultado_Vetra')
+                            
+                            c_exp1.download_button(
+                                label="📊 Baixar Excel (.xlsx)",
+                                data=buffer_excel.getvalue(),
+                                file_name=f"vetra_resultado_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                use_container_width=True
+                            )
+                            
+                            csv_data = df.to_csv(index=False).encode('utf-8')
+                            c_exp2.download_button(
+                                label="📄 Baixar CSV (.csv)",
+                                data=csv_data,
+                                file_name=f"vetra_resultado_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                                mime="text/csv",
+                                use_container_width=True
+                            )
+
+                        with col_chart:
+                            if not df.empty and len(df.columns) >= 2:
+                                idx_msg = len(st.session_state.messages)
+                                tipo_grafico = st.selectbox("Tipo de Gráfico", ["Barras", "Linhas", "Área", "Dispersão"], key=f"chart_type_{idx_msg}")
+                                col_x = st.selectbox("Eixo X", df.columns, index=0, key=f"chart_x_{idx_msg}")
+                                col_y = st.selectbox("Eixo Y", df.columns, index=min(1, len(df.columns)-1), key=f"chart_y_{idx_msg}")
+                                
+                                if tipo_grafico == "Barras":
+                                    fig = px.bar(df, x=col_x, y=col_y, title=f"{col_y} por {col_x}")
+                                elif tipo_grafico == "Linhas":
+                                    fig = px.line(df, x=col_x, y=col_y, title=f"{col_y} por {col_x}", markers=True)
+                                elif tipo_grafico == "Área":
+                                    fig = px.area(df, x=col_x, y=col_y, title=f"{col_y} por {col_x}")
+                                elif tipo_grafico == "Dispersão":
+                                    fig = px.scatter(df, x=col_x, y=col_y, title=f"{col_y} por {col_x}")
+                                
+                                st.plotly_chart(fig, use_container_width=True)
+
+                except Exception as e:
+                    st.warning(f"Não foi possível renderizar a visualização tabular/gráfica: {e}")
 
             # PAINEL DE AVALIAÇÃO RAG TRIAD
             if mcp_chamado and retorno_mcp and "Resultados" in retorno_mcp:
