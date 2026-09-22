@@ -1,0 +1,20 @@
+@echo off
+title Agente Consultivo de Dados - Streamlit (Gemini)
+
+:: Coloque sua chave de API do Gemini aqui
+
+set GEMINI_API_KEY="SUA_KEY_AQUI"
+set QDRANT_URL="ENDPOINT_AQUI"
+set QDRANT_API_KEY="SUA_KEY_AQUI"
+
+
+cd /d "%~dp0"
+
+echo ===================================================
+echo   Iniciando Agente com Gemini API (Gratuito)
+echo ===================================================
+echo.
+
+python -m streamlit run app.py
+
+pause
