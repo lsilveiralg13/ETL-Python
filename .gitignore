@@ -18,3 +18,15 @@ venv/
 .streamlit/
 utils/client_secret.json
 *.json
+# Variáveis de ambiente e segredos
+.env
+*.env
+*.bat
+# Arquivos de ambiente virtual e cache
+venv/
+.venv/
+__pycache__/
+*.pyc
+# Dados locais
+backup_ambiente/
+*.log
