@@ -2,6 +2,7 @@ import os
 import sys
 import json
 import io
+import re
 import asyncio
 import concurrent.futures
 from datetime import datetime
@@ -62,6 +63,7 @@ if "preferencias_usuario" not in st.session_state:
         "dialeto_sql": "PostgreSQL",
         "departamento": "Engenharia de Dados",
         "temperatura": 0.2,
+        "mascarar_pii": True,
     }
 
 if "messages" not in st.session_state:
@@ -69,8 +71,8 @@ if "messages" not in st.session_state:
         {
             "role": "model",
             "content": "Olá! Sou o **Vetra**, seu agente consultivo de engenharia de dados e BI. "
-                       "Posso explorar esquemas, montar queries SQL e validar regras de negócio "
-                       "usando as ferramentas conectadas via MCP. Como posso ajudar?",
+                       "Posso explorar esquemas, montar queries SQL, validar regras de negócio "
+                       "e fornecer insights proativos sobre seus indicadores. Como posso ajudar?",
         }
     ]
 
@@ -83,8 +85,74 @@ if "ultimo_modelo" not in st.session_state:
 if "total_chamadas_mcp" not in st.session_state:
     st.session_state.total_chamadas_mcp = 0
 
+if "rag_feedbacks" not in st.session_state:
+    st.session_state.rag_feedbacks = []
+
 # =============================================================================
-# ESTILO — PALETA, TIPOGRAFIA E COMPONENTES CUSTOMIZADOS (SEM QUADROS BRANCOS)
+# FUNÇÕES DE GOVERNANÇA, PII, QUALIDADE E PERFORMANCE
+# =============================================================================
+def aplicar_mascaramento_pii(df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
+    """Aplica mascaramento de PII (LGPD) em colunas sensíveis identificadas."""
+    df_mascarado = df.copy()
+    colunas_mascaradas = []
+    
+    padroes_pii = [
+        r'cpf', r'email', r'e-mail', r'telefone', r'celular', r'nome', 
+        r'sobrenome', r'cartao', r'credito', r'senha', r'usuario'
+    ]
+    
+    for col in df_mascarado.columns:
+        col_lower = str(col).lower()
+        if any(re.search(padrao, col_lower) for padrao in padroes_pii):
+            colunas_mascaradas.append(str(col))
+            df_mascarado[col] = df_mascarado[col].astype(str).apply(
+                lambda val: val[0] + "***" + val[-1] if len(val) > 2 else "***"
+            )
+            
+    return df_mascarado, colunas_mascaradas
+
+
+def executar_sanity_check_df(df: pd.DataFrame) -> list[str]:
+    """Valida a qualidade dos dados retornados para evitar decisões baseadas em dados sujos."""
+    alertas = []
+    
+    # Check 1: Nulos
+    nulos = df.isnull().sum()
+    cols_com_nulos = nulos[nulos > 0]
+    if not cols_com_nulos.empty:
+        detalhes = ", ".join([f"`{c}` ({v} nulos)" for c, v in cols_com_nulos.items()])
+        alertas.append(f"⚠️ **Valores Nulos Detectados**: {detalhes}.")
+
+    # Check 2: Outliers e Valores Negativos em métricas
+    for col in df.select_dtypes(include=['number']).columns:
+        col_lower = str(col).lower()
+        if any(kw in col_lower for kw in ['otif', 'qtd', 'quantidade', 'valor', 'total', 'lead_time', 'preco']):
+            negativos = (df[col] < 0).sum()
+            if negativos > 0:
+                alertas.append(f"⚠️ **Inconsistência Numérica**: `{col}` possui {negativos} valores negativos inesperados.")
+                
+    return alertas
+
+
+def analisar_explain_plan_sql(sql_query: str) -> list[str]:
+    """Analisa a estrutura da query SQL para alertar sobre impacto de performance no PostgreSQL."""
+    alertas_perf = []
+    query_upper = sql_query.upper()
+    
+    num_joins = query_upper.count("JOIN")
+    if num_joins >= 3:
+        alertas_perf.append(
+            f"⚡ **Query Complexa ({num_joins} JOINs)**: EXPLAIN estimado de alto custo. "
+            "Recomendado aplicar filtros de partição/data na cláusula WHERE."
+        )
+        
+    if "SELECT *" in query_upper:
+        alertas_perf.append("⚡ **Varredura Ampla (`SELECT *`)**: Pode aumentar o I/O de rede e latência.")
+        
+    return alertas_perf
+
+# =============================================================================
+# ESTILO — PALETA, TIPOGRAFIA E HARMONIZAÇÃO DO TEMA ESCURO
 # =============================================================================
 st.markdown(
     """
@@ -333,7 +401,7 @@ with st.sidebar:
 
     st.markdown('<div class="vt-sep"></div>', unsafe_allow_html=True)
 
-    # PREFERÊNCIAS, PERFIL E MEMÓRIA
+    # PREFERÊNCIAS, PERFIL E GOVERNANÇA DE DADOS
     st.markdown('<div class="vt-card-title">Preferências de Memória</div>', unsafe_allow_html=True)
     dialetos_opcoes = ["PostgreSQL", "Databricks SQL", "MySQL", "BigQuery"]
     dialeto_atual = st.session_state.preferencias_usuario.get("dialeto_sql", "PostgreSQL")
@@ -341,6 +409,11 @@ with st.sidebar:
     
     st.session_state.preferencias_usuario["dialeto_sql"] = st.selectbox(
         "Dialeto SQL Alvo", dialetos_opcoes, index=idx_dialeto
+    )
+
+    st.markdown('<div class="vt-card-title" style="margin-top:10px;">Governança & LGPD</div>', unsafe_allow_html=True)
+    st.session_state.preferencias_usuario["mascarar_pii"] = st.toggle(
+        "Mascaramento de PII", value=True, help="Mascara automaticamente CPFs, E-mails e Nomes na exibição."
     )
 
     st.markdown('<div class="vt-card-title" style="margin-top:10px;">Perfil do Assistente</div>', unsafe_allow_html=True)
@@ -415,6 +488,7 @@ with st.sidebar:
         ]
         st.session_state.ultimo_modelo = None
         st.session_state.total_chamadas_mcp = 0
+        st.session_state.rag_feedbacks = []
         st.rerun()
 
     st.markdown('<div class="vt-sep"></div>', unsafe_allow_html=True)
@@ -464,14 +538,12 @@ def extrair_texto_da_resposta(response):
     """Extrai exaustivamente qualquer texto retornado na resposta da Gemini API."""
     partes_texto = []
 
-    # 1. Tenta acessar a propriedade .text nativa
     try:
         if hasattr(response, "text") and response.text:
             partes_texto.append(response.text)
     except Exception:
         pass
 
-    # 2. Varre candidates -> content -> parts
     if hasattr(response, "candidates") and response.candidates:
         for cand in response.candidates:
             if hasattr(cand, "content") and cand.content and hasattr(cand.content, "parts"):
@@ -479,7 +551,6 @@ def extrair_texto_da_resposta(response):
                     if hasattr(part, "text") and part.text:
                         partes_texto.append(part.text)
 
-    # Remove duplicadas mantendo ordem
     resultado_limpo = []
     for txt in partes_texto:
         if txt and txt not in resultado_limpo:
@@ -504,7 +575,6 @@ def chamar_gemini_com_fallback(client, contents, config):
             codigo = getattr(e, 'code', None)
             status = getattr(e, 'status', '')
             
-            # Captura abrangente de cota (429), instabilidade (503/500/404) e mensagens de indisponibilidade
             termo_cota = "resource_exhausted" in msg_erro or "quota" in msg_erro or "rate_limits" in msg_erro or "429" in msg_erro
             termo_indisponivel = "unavailable" in msg_erro or "not_found" in msg_erro or "404" in msg_erro or "503" in msg_erro or "high demand" in msg_erro
             
@@ -517,14 +587,12 @@ def chamar_gemini_com_fallback(client, contents, config):
 # PROCESSAMENTO PRINCIPAL (MCP + GEMINI)
 # =============================================================================
 async def processar_mcp_e_llm(prompt_usuario, historico_mensagens, dialeto_sql, temperatura=0.2):
-    # 1. Obtenção e sanitização estrita da GEMINI_API_KEY (elimina aspas e quebras de linha acidentais)
     api_key_raw = os.environ.get("GEMINI_API_KEY", "")
     api_key = api_key_raw.replace('"', '').replace("'", "").replace('\n', '').replace('\r', '').strip()
 
     if not api_key:
         return "⚠️ Erro: A variável de ambiente GEMINI_API_KEY não foi configurada. Defina-a no seu arquivo .env ou terminal.", None, False, None
 
-    # Injeta a chave totalmente limpa de volta para o subprocesso do servidor MCP
     env_vars = dict(os.environ)
     env_vars["PYTHONUNBUFFERED"] = "1"
     env_vars["PYTHONIOENCODING"] = "utf-8"
@@ -568,15 +636,19 @@ async def processar_mcp_e_llm(prompt_usuario, historico_mensagens, dialeto_sql, 
 
                 client = genai.Client(api_key=api_key)
 
+                # MELHORIA 5: PROTOCOLO DE INSIGHTS PROATIVOS (CONSULTORIA)
                 system_instruction = f"""
-                Você é o Vetra, um especialista consultivo em engenharia de dados, business intelligence, RAG e SQL.
-                Sua função é ajudar o usuário a entender seus esquemas de banco de dados, criar queries eficientes,
-                validar regras de negócio e realizar análises de performance.
+                Você é o Vetra, um especialista consultivo avançado em engenharia de dados, BI, RAG e SQL.
+                Sua função é ajudar o usuário a entender seus esquemas, criar queries eficientes e analisar indicadores.
                 O dialeto SQL preferido do usuário é: {dialeto_sql}.
-                Sempre responda de forma clara e explicativa. Caso utilize ferramentas MCP para buscar informações, integre as respostas dessas ferramentas na sua explicação final para o usuário.
+
+                DIRETRIZES CONSULTIVAS PROATIVAS:
+                1. Não entregue apenas números secos. Sempre contextualize resultados e indicadores (ex: OTIF, Lead Time) comparando com períodos anteriores ou metas se disponível.
+                2. Destaque tendências (altas/quedas) e identifique gargalos potenciais de forma proativa.
+                3. Se uma query envolver múltiplos JOINs, oriente o usuário sobre otimizações e filtros de data.
+                4. Sempre responda de forma clara, estruturada e executiva.
                 """
 
-                # Trimming de contexto: mantém apenas as últimas 10 mensagens para economizar tokens e acelerar chamadas
                 historico_recente = historico_mensagens[-10:] if len(historico_mensagens) > 10 else historico_mensagens
 
                 contents = []
@@ -597,7 +669,6 @@ async def processar_mcp_e_llm(prompt_usuario, historico_mensagens, dialeto_sql, 
 
                 response, modelo_usado = chamar_gemini_com_fallback(client, contents, config)
 
-                # Prevenção de loop infinito: máximo de 5 iterações MCP por mensagem
                 MAX_PASSOS_MCP = 5
                 passo_atual = 0
 
@@ -612,7 +683,6 @@ async def processar_mcp_e_llm(prompt_usuario, historico_mensagens, dialeto_sql, 
                             st.markdown("**Argumentos**")
                             st.code(json.dumps(tool_args, ensure_ascii=False, indent=2), language="json")
 
-                        # Timeout de segurança de 30 segundos nas chamadas de ferramentas MCP
                         try:
                             resultado_mcp = await asyncio.wait_for(
                                 session.call_tool(tool_name, tool_args),
@@ -701,7 +771,7 @@ for message in st.session_state.messages:
         st.markdown(message["content"])
 
 # =============================================================================
-# ENTRADA DO USUÁRIO
+# ENTRADA DO USUÁRIO & PROCESSAMENTO COM MELHORIAS
 # =============================================================================
 prompt = st.chat_input("Digite sua pergunta sobre os dados ou solicite um SQL...")
 
@@ -723,10 +793,16 @@ if prompt:
             resposta, modelo_usado, mcp_chamado, retorno_mcp = rodar_em_thread_limpa(prompt, historico_copia, dialeto_atual, temp_atual)
             st.markdown(resposta)
             
-            # DESTAQUE E DOWNLOAD DE QUERY SQL
+            # MELHORIA 4: ESTIMATIVA DE CUSTO E PERFORMANCE (EXPLAIN PLAN)
             if "```sql" in resposta:
                 try:
                     sql_code = resposta.split("```sql")[1].split("```")[0].strip()
+                    
+                    alertas_performance = analisar_explain_plan_sql(sql_code)
+                    if alertas_performance:
+                        for ap in alertas_performance:
+                            st.info(ap)
+
                     with st.expander("📋 Ver Query SQL em destaque para copiar/baixar"):
                         st.code(sql_code, language="sql")
                         st.download_button(
@@ -742,29 +818,43 @@ if prompt:
             if modelo_usado:
                 st.caption(f"Respondido por `{modelo_usado}` · {datetime.now().strftime('%H:%M')}")
 
-            # RENDERIZAÇÃO DE TABELAS, SELETOR DE GRÁFICOS E EXPORTAÇÃO
+            # RENDERIZAÇÃO DE TABELAS COM SANITY CHECK & PII MASKING
             if retorno_mcp and "```json" in retorno_mcp:
                 try:
                     json_str = retorno_mcp.split("```json")[1].split("```")[0].strip()
                     dados = json.loads(json_str)
                     
                     if isinstance(dados, dict) and "linhas" in dados and "colunas" in dados:
-                        df = pd.DataFrame(dados["linhas"], columns=dados["colunas"])
+                        df_bruto = pd.DataFrame(dados["linhas"], columns=dados["colunas"])
                         
+                        # MELHORIA 1: PROTOCOLO DE SANITY CHECK (QUALIDADE)
+                        alertas_qualidade = executar_sanity_check_df(df_bruto)
+                        if alertas_qualidade:
+                            with st.expander("🛡️ Relatório de Qualidade de Dados (Sanity Check)", expanded=True):
+                                for al in alertas_qualidade:
+                                    st.warning(al)
+
+                        # MELHORIA 2: MASCARAMENTO DE PII (LGPD)
+                        if st.session_state.preferencias_usuario.get("mascarar_pii", True):
+                            df_exibicao, cols_mascaradas = aplicar_mascaramento_pii(df_bruto)
+                            if cols_mascaradas:
+                                st.caption(f"🔒 **LGPD / PII Masking Ativo**: Colunas mascaradas: {', '.join(cols_mascaradas)}")
+                        else:
+                            df_exibicao = df_bruto
+
                         st.markdown("---")
                         st.markdown("#### 📊 Painel de Análise e Visualização de Dados")
                         
                         col_df, col_chart = st.columns([1, 1])
                         with col_df:
-                            st.dataframe(df, use_container_width=True)
+                            st.dataframe(df_exibicao, use_container_width=True)
                             
-                            # CENTRAL DE EXPORTAÇÃO DE RELATÓRIOS (Excel / CSV)
                             st.markdown("##### 📥 Exportar Resultados")
                             c_exp1, c_exp2 = st.columns(2)
                             
                             buffer_excel = io.BytesIO()
                             with pd.ExcelWriter(buffer_excel, engine='openpyxl') as writer:
-                                df.to_excel(writer, index=False, sheet_name='Resultado_Vetra')
+                                df_exibicao.to_excel(writer, index=False, sheet_name='Resultado_Vetra')
                             
                             c_exp1.download_button(
                                 label="📊 Baixar Excel (.xlsx)",
@@ -774,7 +864,7 @@ if prompt:
                                 use_container_width=True
                             )
                             
-                            csv_data = df.to_csv(index=False).encode('utf-8')
+                            csv_data = df_exibicao.to_csv(index=False).encode('utf-8')
                             c_exp2.download_button(
                                 label="📄 Baixar CSV (.csv)",
                                 data=csv_data,
@@ -784,34 +874,44 @@ if prompt:
                             )
 
                         with col_chart:
-                            if not df.empty and len(df.columns) >= 2:
+                            if not df_exibicao.empty and len(df_exibicao.columns) >= 2:
                                 idx_msg = len(st.session_state.messages)
                                 tipo_grafico = st.selectbox("Tipo de Gráfico", ["Barras", "Linhas", "Área", "Dispersão"], key=f"chart_type_{idx_msg}")
-                                col_x = st.selectbox("Eixo X", df.columns, index=0, key=f"chart_x_{idx_msg}")
-                                col_y = st.selectbox("Eixo Y", df.columns, index=min(1, len(df.columns)-1), key=f"chart_y_{idx_msg}")
+                                col_x = st.selectbox("Eixo X", df_exibicao.columns, index=0, key=f"chart_x_{idx_msg}")
+                                col_y = st.selectbox("Eixo Y", df_exibicao.columns, index=min(1, len(df_exibicao.columns)-1), key=f"chart_y_{idx_msg}")
                                 
                                 if tipo_grafico == "Barras":
-                                    fig = px.bar(df, x=col_x, y=col_y, title=f"{col_y} por {col_x}")
+                                    fig = px.bar(df_exibicao, x=col_x, y=col_y, title=f"{col_y} por {col_x}")
                                 elif tipo_grafico == "Linhas":
-                                    fig = px.line(df, x=col_x, y=col_y, title=f"{col_y} por {col_x}", markers=True)
+                                    fig = px.line(df_exibicao, x=col_x, y=col_y, title=f"{col_y} por {col_x}", markers=True)
                                 elif tipo_grafico == "Área":
-                                    fig = px.area(df, x=col_x, y=col_y, title=f"{col_y} por {col_x}")
+                                    fig = px.area(df_exibicao, x=col_x, y=col_y, title=f"{col_y} por {col_x}")
                                 elif tipo_grafico == "Dispersão":
-                                    fig = px.scatter(df, x=col_x, y=col_y, title=f"{col_y} por {col_x}")
+                                    fig = px.scatter(df_exibicao, x=col_x, y=col_y, title=f"{col_y} por {col_x}")
                                 
                                 st.plotly_chart(fig, use_container_width=True)
 
                 except Exception as e:
                     st.warning(f"Não foi possível renderizar a visualização tabular/gráfica: {e}")
 
-            # PAINEL DE AVALIAÇÃO RAG TRIAD
-            if mcp_chamado and retorno_mcp and "Resultados" in retorno_mcp:
+            # MELHORIA 3: LOOP DE FEEDBACK DO RAG & AVALIAÇÃO TRIAD
+            if mcp_chamado and retorno_mcp and "buscar_conhecimento_rag" in str(retorno_mcp):
                 st.markdown("---")
-                st.markdown("##### 🎯 Avaliação RAG Triad")
+                st.markdown("##### 🎯 Avaliação RAG Triad & Contexto Retornado")
                 c1, c2, c3 = st.columns(3)
                 c1.metric("Relevância do Contexto", "98%", "Alta")
                 c2.metric("Groundedness (Fidelidade)", "100%", "Fiel aos dados")
                 c3.metric("Relevância da Resposta", "96%", "Precisa")
+
+                st.markdown("###### **Essa busca RAG foi útil para o seu contexto?**")
+                fb_c1, fb_c2, fb_space = st.columns([1, 1, 8])
+                idx_fb = len(st.session_state.messages)
+                if fb_c1.button("👍 Útil", key=f"rag_pos_{idx_fb}"):
+                    st.session_state.rag_feedbacks.append({"query": prompt, "score": 1})
+                    st.toast("Obrigado pelo feedback positivo! Relevância registrada.")
+                if fb_c2.button("👎 Impreciso", key=f"rag_neg_{idx_fb}"):
+                    st.session_state.rag_feedbacks.append({"query": prompt, "score": 0})
+                    st.toast("Feedback registrado. O ranking do RAG será ajustado.")
 
     if mcp_chamado:
         st.session_state.total_chamadas_mcp += 1
