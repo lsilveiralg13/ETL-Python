@@ -130,6 +130,35 @@ st.markdown(
         color: var(--text-muted) !important;
     }
 
+    /* ---------------- CORREÇÃO DOS QUADROS BRANCOS / COMPONENTES NATIVOS ---------------- */
+    div[data-baseweb="input"] > div, 
+    div[data-baseweb="select"] > div,
+    div[data-baseweb="base-input"],
+    input, 
+    textarea, 
+    [data-testid="stChatInput"] textarea {
+        background-color: var(--bg-surface) !important;
+        color: var(--text-primary) !important;
+        border-color: var(--border-strong) !important;
+    }
+
+    [data-testid="stChatInput"] {
+        background-color: var(--bg-surface) !important;
+        border: 1px solid var(--border-strong) !important;
+        border-radius: 12px !important;
+    }
+
+    [data-testid="stFileUploader"] section {
+        background-color: var(--bg-surface) !important;
+        border: 1px dashed var(--border-strong) !important;
+        color: var(--text-primary) !important;
+    }
+
+    [data-baseweb="popover"], [data-baseweb="menu"], ul[role="listbox"] {
+        background-color: var(--bg-panel) !important;
+        color: var(--text-primary) !important;
+    }
+
     /* ---------------- TÍTULOS ---------------- */
     h1, h2, h3 {
         font-family: 'Space Grotesk', sans-serif !important;
@@ -224,11 +253,6 @@ st.markdown(
     }
     [data-testid="stChatInput"] textarea {
         font-family: 'Inter', sans-serif;
-    }
-    [data-testid="stChatInput"] {
-        border: 1px solid var(--border-strong) !important;
-        border-radius: 12px !important;
-        background: var(--bg-surface) !important;
     }
 
     /* ---------------- BOTÕES ---------------- */
