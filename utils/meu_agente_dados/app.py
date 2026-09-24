@@ -40,9 +40,11 @@ MODELOS_PREFERENCIA = [
 CATALOGO_FERRAMENTAS = [
     {"nome": "validar_e_executar_sql", "descricao": "Valida via AST e Schema-Aware antes de rodar"},
     {"nome": "buscar_conhecimento_rag", "descricao": "Busca vetorial/semântica no Qdrant Cloud com Cache"},
-    {"nome": "indexar_documento_com_chunking", "descricao": "Chunking + Ingestão no Qdrant Cloud"},
+    {"nome": "indexar_documento_com_chunking", "descricao": "Chunking + Ingestão no Qdrant Cloud (PII Masked)"},
     {"nome": "listar_esquemas_e_tabelas", "descricao": "Lista tabelas e visões do ambiente"},
     {"nome": "descrever_estrutura_tabela", "descricao": "Traz DDL, colunas e tipos de uma tabela"},
+    {"nome": "calcular_indicador_otif", "descricao": "Métrica de entregas logísticas On-Time In-Full"},
+    {"nome": "calcular_lead_time_producao", "descricao": "Métrica de tempo de ciclo de produção/OEE"}
 ]
 
 SUGESTOES_INICIAIS = [
@@ -51,6 +53,35 @@ SUGESTOES_INICIAIS = [
     "Qual a fórmula do OTIF % acumulado?",
     "Monte uma query de produção do mês atual",
 ]
+
+# =============================================================================
+# ESTADO DE SESSÃO & MEMÓRIA (INICIALIZAÇÃO GARANTIDA NO TOPO)
+# =============================================================================
+if "preferencias_usuario" not in st.session_state:
+    st.session_state.preferencias_usuario = {
+        "dialeto_sql": "PostgreSQL",
+        "departamento": "Engenharia de Dados",
+        "temperatura": 0.2,
+    }
+
+if "messages" not in st.session_state:
+    st.session_state.messages = [
+        {
+            "role": "model",
+            "content": "Olá! Sou o **Vetra**, seu agente consultivo de engenharia de dados e BI. "
+                       "Posso explorar esquemas, montar queries SQL e validar regras de negócio "
+                       "usando as ferramentas conectadas via MCP. Como posso ajudar?",
+        }
+    ]
+
+if "pending_prompt" not in st.session_state:
+    st.session_state.pending_prompt = None
+
+if "ultimo_modelo" not in st.session_state:
+    st.session_state.ultimo_modelo = None
+
+if "total_chamadas_mcp" not in st.session_state:
+    st.session_state.total_chamadas_mcp = 0
 
 # =============================================================================
 # ESTILO — PALETA, TIPOGRAFIA E COMPONENTES CUSTOMIZADOS
@@ -227,30 +258,6 @@ st.markdown(
 )
 
 # =============================================================================
-# ESTADO DE SESSÃO & MEMÓRIA
-# =============================================================================
-if "messages" not in st.session_state:
-    st.session_state.messages = [
-        {
-            "role": "model",
-            "content": "Olá! Sou o **Vetra**, seu agente consultivo de engenharia de dados e BI. "
-                       "Posso explorar esquemas, montar queries SQL e validar regras de negócio "
-                       "usando as ferramentas conectadas via MCP. Como posso ajudar?",
-        }
-    ]
-if "pending_prompt" not in st.session_state:
-    st.session_state.pending_prompt = None
-if "ultimo_modelo" not in st.session_state:
-    st.session_state.ultimo_modelo = None
-if "total_chamadas_mcp" not in st.session_state:
-    st.session_state.total_chamadas_mcp = 0
-if "preferencias_usuario" not in st.session_state:
-    st.session_state.preferencias_usuario = {
-        "dialeto_sql": "PostgreSQL",
-        "departamento": "Engenharia de Dados"
-    }
-
-# =============================================================================
 # SIDEBAR
 # =============================================================================
 with st.sidebar:
@@ -302,11 +309,27 @@ with st.sidebar:
 
     st.markdown('<div class="vt-sep"></div>', unsafe_allow_html=True)
 
-    # PREFERÊNCIAS E MEMÓRIA
+    # PREFERÊNCIAS, PERFIL E MEMÓRIA
     st.markdown('<div class="vt-card-title">Preferências de Memória</div>', unsafe_allow_html=True)
+    dialetos_opcoes = ["PostgreSQL", "Databricks SQL", "MySQL", "BigQuery"]
+    dialeto_atual = st.session_state.preferencias_usuario.get("dialeto_sql", "PostgreSQL")
+    idx_dialeto = dialetos_opcoes.index(dialeto_atual) if dialeto_atual in dialetos_opcoes else 0
+    
     st.session_state.preferencias_usuario["dialeto_sql"] = st.selectbox(
-        "Dialeto SQL Alvo", ["PostgreSQL", "Databricks SQL", "MySQL", "BigQuery"]
+        "Dialeto SQL Alvo", dialetos_opcoes, index=idx_dialeto
     )
+
+    st.markdown('<div class="vt-card-title" style="margin-top:10px;">Perfil do Assistente</div>', unsafe_allow_html=True)
+    perfil_selecionado = st.selectbox(
+        "Modo de Operação",
+        ["Engenheiro de Dados (Preciso)", "Analista de BI (Consultivo)", "Auditor de Governança (Estrito)"]
+    )
+    temp_map = {
+        "Engenheiro de Dados (Preciso)": 0.1,
+        "Analista de BI (Consultivo)": 0.3,
+        "Auditor de Governança (Estrito)": 0.0
+    }
+    st.session_state.preferencias_usuario["temperatura"] = temp_map[perfil_selecionado]
 
     st.markdown('<div class="vt-sep"></div>', unsafe_allow_html=True)
 
@@ -342,6 +365,23 @@ with st.sidebar:
         unsafe_allow_html=True,
     )
 
+    # EXPORTAÇÃO COMPLETA DO HISTÓRICO
+    if len(st.session_state.messages) > 1:
+        st.markdown('<div class="vt-card-title">Exportar Sessão</div>', unsafe_allow_html=True)
+        linhas_md = ["# Relatório Consultivo — Vetra Data Agent\n\n"]
+        for msg in st.session_state.messages:
+            papel = "🧑‍💻 **Usuário**" if msg["role"] == "user" else "🤖 **Vetra**"
+            linhas_md.append(f"### {papel}\n{msg['content']}\n\n---\n")
+        
+        conteudo_md = "".join(linhas_md)
+        st.download_button(
+            label="📝 Baixar Atendimento (.md)",
+            data=conteudo_md,
+            file_name=f"vetra_atendimento_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md",
+            mime="text/markdown",
+            use_container_width=True
+        )
+
     if st.button("🗑️  Limpar conversa", use_container_width=True):
         st.session_state.messages = [
             {
@@ -354,7 +394,7 @@ with st.sidebar:
         st.rerun()
 
     st.markdown('<div class="vt-sep"></div>', unsafe_allow_html=True)
-    st.caption("Vetra roda localmente via Streamlit + MCP, com a Google Gemini API.")
+    st.caption("Vetra Is Powered By Google Gemini API + Qdrant Vector Database.")
 
 # =============================================================================
 # CABEÇALHO PRINCIPAL
@@ -364,8 +404,8 @@ st.markdown(
     <div class="vt-hero">
         <div class="vt-mark">V</div>
         <div>
-            <h1>Vetra — Agente Consultivo de Análise de Dados</h1>
-            <p>Conectado ao servidor MCP · Google Gemini API</p>
+            <h1>Vetra — Agente Consultivo de Dados e Engenharia</h1>
+            <p>Conectado ao servidor MCP · Google Gemini API · Qdrant Vector Database</p>
         </div>
     </div>
     """,
@@ -438,11 +478,13 @@ def chamar_gemini_com_fallback(client, contents, config):
             ultimo_erro = e
             msg_erro = str(e).lower()
             codigo = getattr(e, 'code', None)
+            status = getattr(e, 'status', '')
             
+            # Captura abrangente de cota (429), instabilidade (503/500/404) e mensagens de indisponibilidade
             termo_cota = "resource_exhausted" in msg_erro or "quota" in msg_erro or "rate_limits" in msg_erro or "429" in msg_erro
-            termo_indisponivel = "unavailable" in msg_erro or "not_found" in msg_erro or "404" in msg_erro or "503" in msg_erro
+            termo_indisponivel = "unavailable" in msg_erro or "not_found" in msg_erro or "404" in msg_erro or "503" in msg_erro or "high demand" in msg_erro
             
-            if codigo in (429, 503, 404) or termo_cota or termo_indisponivel:
+            if codigo in (429, 503, 500, 404) or "503" in str(status) or termo_cota or termo_indisponivel:
                 continue
             raise e
     raise ultimo_erro
@@ -450,7 +492,7 @@ def chamar_gemini_com_fallback(client, contents, config):
 # =============================================================================
 # PROCESSAMENTO PRINCIPAL (MCP + GEMINI)
 # =============================================================================
-async def processar_mcp_e_llm(prompt_usuario, historico_mensagens, dialeto_sql):
+async def processar_mcp_e_llm(prompt_usuario, historico_mensagens, dialeto_sql, temperatura=0.2):
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
         return "⚠️ Erro: A variável de ambiente GEMINI_API_KEY não foi configurada. Defina-a no seu arquivo .env ou terminal.", None, False, None
@@ -522,7 +564,7 @@ async def processar_mcp_e_llm(prompt_usuario, historico_mensagens, dialeto_sql):
                 config = types.GenerateContentConfig(
                     system_instruction=system_instruction,
                     tools=[types.Tool(function_declarations=function_declarations)],
-                    temperature=0.2,
+                    temperature=temperatura,
                 )
 
                 response, modelo_usado = chamar_gemini_com_fallback(client, contents, config)
@@ -594,9 +636,9 @@ async def processar_mcp_e_llm(prompt_usuario, historico_mensagens, dialeto_sql):
         return f"❌ Erro na integração MCP/Gemini: {type(e).__name__} - {str(e)}", None, False, None
 
 
-def rodar_em_thread_limpa(prompt, historico, dialeto_sql):
+def rodar_em_thread_limpa(prompt, historico, dialeto_sql, temperatura):
     def worker():
-        return anyio.run(processar_mcp_e_llm, prompt, historico, dialeto_sql, backend="asyncio")
+        return anyio.run(processar_mcp_e_llm, prompt, historico, dialeto_sql, temperatura, backend="asyncio")
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
         future = executor.submit(worker)
@@ -645,12 +687,30 @@ if prompt:
         st.markdown(prompt)
 
     historico_copia = list(st.session_state.messages)
-    dialeto_atual = st.session_state.preferencias_usuario["dialeto_sql"]
+    dialeto_atual = st.session_state.preferencias_usuario.get("dialeto_sql", "PostgreSQL")
+    temp_atual = st.session_state.preferencias_usuario.get("temperatura", 0.2)
 
     with st.chat_message("assistant", avatar=AVATAR_MODELO):
         with st.spinner("Consultando MCP e processando com Gemini..."):
-            resposta, modelo_usado, mcp_chamado, retorno_mcp = rodar_em_thread_limpa(prompt, historico_copia, dialeto_atual)
+            resposta, modelo_usado, mcp_chamado, retorno_mcp = rodar_em_thread_limpa(prompt, historico_copia, dialeto_atual, temp_atual)
             st.markdown(resposta)
+            
+            # DESTAQUE E DOWNLOAD DE QUERY SQL
+            if "```sql" in resposta:
+                try:
+                    sql_code = resposta.split("```sql")[1].split("```")[0].strip()
+                    with st.expander("📋 Ver Query SQL em destaque para copiar/baixar"):
+                        st.code(sql_code, language="sql")
+                        st.download_button(
+                            label="💾 Baixar Query (.sql)",
+                            data=sql_code,
+                            file_name=f"query_vetra_{datetime.now().strftime('%H%M%S')}.sql",
+                            mime="text/plain",
+                            key=f"dl_sql_{len(st.session_state.messages)}"
+                        )
+                except Exception:
+                    pass
+
             if modelo_usado:
                 st.caption(f"Respondido por `{modelo_usado}` · {datetime.now().strftime('%H:%M')}")
 

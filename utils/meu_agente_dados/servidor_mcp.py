@@ -2,6 +2,7 @@ import os
 import sys
 import json
 import time
+import re
 from typing import Optional, List, Dict, Any
 from functools import wraps
 from mcp.server.mcpserver import MCPServer
@@ -33,6 +34,26 @@ def obter_cliente_qdrant():
         except Exception as e:
             print(f"Erro ao conectar ao Qdrant: {e}", file=sys.stderr)
     return qdrant_cliente
+
+# -----------------------------------------------------------------------------
+# SANITIZAÇÃO E MASCARAMENTO PII (PROTEÇÃO DE DADOS SENSÍVEIS)
+# -----------------------------------------------------------------------------
+def mascarar_dados_sensiveis(texto: str) -> str:
+    """Aplica regex para ocultar CPFs, e-mails e telefones antes de trafegar ou salvar."""
+    if not texto:
+        return texto
+    
+    # Oculta CPFs (formato XXX.XXX.XXX-XX ou sequências de 11 dígitos)
+    texto = re.sub(r'\b\d{3}\.\d{3}\.\d{3}-\d{2}\b', '[CPF_OCULTO]', texto)
+    texto = re.sub(r'\b\d{11}\b', '[CPF_OCULTO]', texto)
+    
+    # Oculta E-mails
+    texto = re.sub(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', '[EMAIL_OCULTO]', texto)
+    
+    # Oculta Telefones com DDD
+    texto = re.sub(r'\b(?:\+?55\s?)?(?:\(?\d{2}\)?\s?)?\d{4,5}[-\s]?\d{4}\b', '[TELEFONE_OCULTO]', texto)
+    
+    return texto
 
 # -----------------------------------------------------------------------------
 # DICIONÁRIO DE DADOS E SCHEMA-AWARENESS
@@ -90,13 +111,16 @@ def indexar_documento_com_chunking(
     categoria: str = "Geral",
     departamento: str = "TI"
 ) -> str:
-    """Divide um texto longo em chunks e indexa no Qdrant Cloud com metadados ricos."""
+    """Divide um texto longo em chunks e indexa no Qdrant Cloud com metadados ricos e PII sanitizado."""
     client = obter_cliente_qdrant()
     if not client:
         return "⚠️ Qdrant Cloud não configurado ou indisponível."
 
     try:
-        chunks = dividir_em_chunks(texto)
+        # Aplica sanitização PII antes do chunking
+        texto_sanitizado = mascarar_dados_sensiveis(texto)
+        chunks = dividir_em_chunks(texto_sanitizado)
+        
         metadados = [
             {
                 "fonte": fonte,
@@ -113,7 +137,7 @@ def indexar_documento_com_chunking(
             documents=chunks,
             metadata=metadados
         )
-        return f"✅ Documento '{fonte}' indexado com sucesso! ({len(chunks)} chunks criados no Qdrant)."
+        return f"✅ Documento '{fonte}' sanitizado e indexado com sucesso! ({len(chunks)} chunks criados no Qdrant)."
     except Exception as e:
         return f"Erro ao indexar no Qdrant: {str(e)}"
 
@@ -218,6 +242,52 @@ def descrever_estrutura_tabela(nome_tabela: str) -> str:
     if nome_tabela in DICIONARIO_DADOS:
         return f"Tabela `{nome_tabela}` colunas: {', '.join(DICIONARIO_DADOS[nome_tabela])}"
     return f"Tabela `{nome_tabela}` não encontrada."
+
+# -----------------------------------------------------------------------------
+# FERRAMENTAS MCP — CÁLCULO DE INDICADORES DE BI (DADOS SINTÉTICOS)
+# -----------------------------------------------------------------------------
+@mcp.tool()
+@com_cache(ttl_segundos=180)
+def calcular_indicador_otif(unidade: Optional[str] = None) -> str:
+    """Calcula o indicador de performance logístico OTIF (On-Time In-Full) acumulado do período."""
+    dados_otif = {
+        "Contagem": {"total_pedidos": 450, "no_prazo": 420, "completos": 410, "otif_sucesso": 398},
+        "Belo Horizonte": {"total_pedidos": 600, "no_prazo": 570, "completos": 550, "otif_sucesso": 530},
+        "Geral": {"total_pedidos": 1050, "no_prazo": 990, "completos": 960, "otif_sucesso": 928}
+    }
+    
+    alvo = unidade if unidade in dados_otif else "Geral"
+    d = dados_otif[alvo]
+    
+    otif_pct = round((d["otif_sucesso"] / d["total_pedidos"]) * 100, 2)
+    on_time_pct = round((d["no_prazo"] / d["total_pedidos"]) * 100, 2)
+    in_full_pct = round((d["completos"] / d["total_pedidos"]) * 100, 2)
+
+    resultado = {
+        "unidade": alvo,
+        "indicador": "OTIF (On-Time In-Full)",
+        "otif_percentual": f"{otif_pct}%",
+        "detalhes": {
+            "on_time_prazo": f"{on_time_pct}%",
+            "in_full_completo": f"{in_full_pct}%",
+            "total_pedidos": d["total_pedidos"],
+            "pedidos_otif_perfeito": d["otif_sucesso"]
+        }
+    }
+    return f"```json\n{json.dumps(resultado, ensure_ascii=False, indent=2)}\n```"
+
+@mcp.tool()
+@com_cache(ttl_segundos=180)
+def calcular_lead_time_producao(linha_produto: str = "Geral") -> str:
+    """Calcula o tempo médio de ciclo e lead time de ordens de produção."""
+    metricas = {
+        "linha_produto": linha_produto,
+        "lead_time_medio_dias": 4.2,
+        "tempo_setup_horas": 1.5,
+        "eficiencia_geral_oee": "87.4%",
+        "gargalo_identificado": "Etapa de Pintura / Carga Térmica"
+    }
+    return f"```json\n{json.dumps(metricas, ensure_ascii=False, indent=2)}\n```"
 
 if __name__ == "__main__":
     mcp.run()
