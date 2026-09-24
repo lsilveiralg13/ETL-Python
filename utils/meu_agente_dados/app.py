@@ -84,7 +84,7 @@ if "total_chamadas_mcp" not in st.session_state:
     st.session_state.total_chamadas_mcp = 0
 
 # =============================================================================
-# ESTILO — PALETA, TIPOGRAFIA E COMPONENTES CUSTOMIZADOS
+# ESTILO — PALETA, TIPOGRAFIA E COMPONENTES CUSTOMIZADOS (SEM QUADROS BRANCOS)
 # =============================================================================
 st.markdown(
     """
@@ -130,7 +130,7 @@ st.markdown(
         color: var(--text-muted) !important;
     }
 
-    /* ---------------- CORREÇÃO DOS QUADROS BRANCOS / COMPONENTES NATIVOS ---------------- */
+    /* ---------------- HARMONIZAÇÃO DO TEMA ESCURO (INPUTS E NATIVOS) ---------------- */
     div[data-baseweb="input"] > div, 
     div[data-baseweb="select"] > div,
     div[data-baseweb="base-input"],
@@ -517,10 +517,14 @@ def chamar_gemini_com_fallback(client, contents, config):
 # PROCESSAMENTO PRINCIPAL (MCP + GEMINI)
 # =============================================================================
 async def processar_mcp_e_llm(prompt_usuario, historico_mensagens, dialeto_sql, temperatura=0.2):
-    api_key = os.environ.get("GEMINI_API_KEY")
+    # 1. Obtenção e sanitização estrita da GEMINI_API_KEY (elimina aspas e quebras de linha acidentais)
+    api_key_raw = os.environ.get("GEMINI_API_KEY", "")
+    api_key = api_key_raw.replace('"', '').replace("'", "").replace('\n', '').replace('\r', '').strip()
+
     if not api_key:
         return "⚠️ Erro: A variável de ambiente GEMINI_API_KEY não foi configurada. Defina-a no seu arquivo .env ou terminal.", None, False, None
 
+    # Injeta a chave totalmente limpa de volta para o subprocesso do servidor MCP
     env_vars = dict(os.environ)
     env_vars["PYTHONUNBUFFERED"] = "1"
     env_vars["PYTHONIOENCODING"] = "utf-8"
