@@ -33,3 +33,4 @@ backup_ambiente/
 # Permitir explicitamente a pasta do GitHub Actions
 !/.github/
 !/.github/workflows/*
+!/.streamlit/*
