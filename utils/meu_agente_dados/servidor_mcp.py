@@ -8,6 +8,8 @@ from functools import wraps
 from mcp.server.mcpserver import MCPServer
 from qdrant_client import QdrantClient
 import sqlglot
+import requests
+import pandas as pd
 
 mcp = MCPServer("AgenteConsultivoDados")
 
@@ -326,6 +328,98 @@ def calcular_lead_time_producao(linha_produto: str = "Geral") -> str:
         "gargalo_identificado": "Etapa de Pintura / Carga Térmica"
     }
     return f"```json\n{json.dumps(metricas, ensure_ascii=False, indent=2)}\n```"
+
+# -----------------------------------------------------------------------------
+# FERRAMENTAS MCP — API PÚBLICA DO IBGE (SIDRA E LOCALIDADES)
+# -----------------------------------------------------------------------------
+@mcp.tool()
+@com_cache(ttl_segundos=600)
+def consultar_ibge_sidra(tabela: str = "1737", periodo: str = "last 6", variavel: str = "all") -> str:
+    """
+    Consulta a API da SIDRA / IBGE para obter indicadores econômicos e sociais em tempo real.
+    Exemplos de tabelas comuns:
+    - '1737': IPCA (Índice de Preços ao Consumidor Amplo - Var. % e acumulados)
+    - '7060': IPCA - Peso, variação mensal e acumulados por grupo
+    - '4099': População residente (Censo / Estimativas)
+    
+    Parâmetros:
+    - tabela: Código da tabela SIDRA (ex: '1737')
+    - periodo: Período desejado ('last', 'last 6', 'last 12', ou ano/mês ex: '202401')
+    - variavel: Código da variável desejada ou 'all' para trazer todas
+    """
+    try:
+        url = f"https://servicodados.ibge.gov.br/api/v3/agregados/{tabela}/periodos/{periodo}/variaveis/{variavel}?localidades=N1[all]"
+        headers = {"User-Agent": "VetraDataAgent/1.0"}
+        response = requests.get(url, headers=headers, timeout=15)
+        
+        if response.status_code != 200:
+            return f"Error: A API do IBGE/SIDRA retornou status {response.status_code}."
+            
+        dados = response.json()
+        if not dados:
+            return "Nenhum resultado encontrado na SIDRA para a tabela e período informados."
+            
+        resultados = []
+        for item in dados:
+            var_nome = item.get("variavel", "Valor")
+            unidade = item.get("unidade", "")
+            for res in item.get("resultados", []):
+                for serie in res.get("series", []):
+                    localidade = serie.get("localidade", {}).get("nome", "Brasil")
+                    for data_p, valor in serie.get("serie", {}).items():
+                        resultados.append({
+                            "periodo": data_p,
+                            "indicador": f"{var_nome} ({unidade})",
+                            "localidade": localidade,
+                            "valor": float(valor) if valor not in [None, "...", "-"] else None
+                        })
+                        
+        if not resultados:
+            return "Nenhum dado numérico retornado pela SIDRA."
+
+        df_res = pd.DataFrame(resultados)
+        
+        retorno_json = {
+            "colunas": list(df_res.columns),
+            "linhas": df_res.values.tolist()
+        }
+        return f"```json\n{json.dumps(retorno_json, ensure_ascii=False, indent=2)}\n```"
+
+    except Exception as e:
+        return f"Error ao consultar a API da SIDRA/IBGE: {type(e).__name__} - {str(e)}"
+
+@mcp.tool()
+@com_cache(ttl_segundos=600)
+def buscar_dados_municipio_ibge(nome_municipio: str) -> str:
+    """
+    Busca metadados, código IBGE, microrregião, mesorregião e UF de um município brasileiro via API de Localidades do IBGE.
+    """
+    try:
+        url = f"https://servicodados.ibge.gov.br/api/v1/localidades/municipios/{nome_municipio}"
+        headers = {"User-Agent": "VetraDataAgent/1.0"}
+        response = requests.get(url, headers=headers, timeout=10)
+        
+        if response.status_code != 200 or not response.json():
+            return f"Município '{nome_municipio}' não encontrado na base do IBGE."
+            
+        dados = response.json()
+        if isinstance(dados, list) and len(dados) > 0:
+            mun = dados[0]
+        else:
+            mun = dados
+            
+        info = {
+            "id_ibge": mun.get("id"),
+            "municipio": mun.get("nome"),
+            "uf": mun.get("microrregiao", {}).get("mesorregiao", {}).get("UF", {}).get("sigla"),
+            "estado": mun.get("microrregiao", {}).get("mesorregiao", {}).get("UF", {}).get("nome"),
+            "regiao": mun.get("microrregiao", {}).get("mesorregiao", {}).get("UF", {}).get("regiao", {}).get("nome")
+        }
+        
+        return json.dumps(info, ensure_ascii=False, indent=2)
+
+    except Exception as e:
+        return f"Error ao buscar município no IBGE: {type(e).__name__} - {str(e)}"
 
 if __name__ == "__main__":
     mcp.run()

@@ -45,7 +45,9 @@ CATALOGO_FERRAMENTAS = [
     {"nome": "listar_esquemas_e_tabelas", "descricao": "Lista tabelas e visões do ambiente"},
     {"nome": "descrever_estrutura_tabela", "descricao": "Traz DDL, colunas e tipos de uma tabela"},
     {"nome": "calcular_indicador_otif", "descricao": "Métrica de entregas logísticas On-Time In-Full"},
-    {"nome": "calcular_lead_time_producao", "descricao": "Métrica de tempo de ciclo de produção/OEE"}
+    {"nome": "calcular_lead_time_producao", "descricao": "Métrica de tempo de ciclo de produção/OEE"},
+    {"nome": "consultar_ibge_sidra", "descricao": "Consulta indicadores de inflação (IPCA), população e PIB no IBGE/SIDRA"},
+    {"nome": "buscar_dados_municipio_ibge", "descricao": "Obtém código IBGE, UF e região de um município brasileiro"}
 ]
 
 SUGESTOES_INICIAIS = [
