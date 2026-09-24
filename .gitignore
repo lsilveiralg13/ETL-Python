@@ -15,7 +15,6 @@ desktop.ini
 tarefas.db
 .venv/
 venv/
-.streamlit/
 utils/client_secret.json
 *.json
 # Variáveis de ambiente e segredos
