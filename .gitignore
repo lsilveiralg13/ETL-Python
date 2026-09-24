@@ -30,3 +30,6 @@ __pycache__/
 # Dados locais
 backup_ambiente/
 *.log
+# Permitir explicitamente a pasta do GitHub Actions
+!/.github/
+!/.github/workflows/*
