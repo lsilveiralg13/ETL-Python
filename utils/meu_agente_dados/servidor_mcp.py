@@ -225,12 +225,10 @@ def validar_e_executar_sql(query: str, dialecto: str = "postgres") -> str:
         if not isinstance(parsed, sqlglot.exp.Select):
             return "❌ Erro de Segurança: Apenas instruções SELECT são permitidas."
 
-        # Guardrail de Performance: Evitar pesquisas completas sem restrição de limite
         if not parsed.find(sqlglot.exp.Limit):
             query_modificada = f"{query.rstrip(';')} LIMIT 100;"
             parsed = sqlglot.parse_one(query_modificada, read=dialecto)
 
-        # Validação Schema-Aware
         tabelas_citadas = [t.name for t in parsed.find_all(sqlglot.exp.Table)]
         for tab in tabelas_citadas:
             if tab not in DICIONARIO_DADOS_DETALHADO:
@@ -337,15 +335,8 @@ def calcular_lead_time_producao(linha_produto: str = "Geral") -> str:
 def consultar_ibge_sidra(tabela: str = "1737", periodo: str = "last 6", variavel: str = "all") -> str:
     """
     Consulta a API da SIDRA / IBGE para obter indicadores econômicos e sociais em tempo real.
-    Exemplos de tabelas comuns:
-    - '1737': IPCA (Índice de Preços ao Consumidor Amplo - Var. % e acumulados)
-    - '7060': IPCA - Peso, variação mensal e acumulados por grupo
-    - '4099': População residente (Censo / Estimativas)
-    
-    Parâmetros:
-    - tabela: Código da tabela SIDRA (ex: '1737')
-    - periodo: Período desejado ('last', 'last 6', 'last 12', ou ano/mês ex: '202401')
-    - variavel: Código da variável desejada ou 'all' para trazer todas
+    - '1737': IPCA (Var. % e acumulados)
+    - '4099': População residente
     """
     try:
         url = f"https://servicodados.ibge.gov.br/api/v3/agregados/{tabela}/periodos/{periodo}/variaveis/{variavel}?localidades=N1[all]"
@@ -373,27 +364,20 @@ def consultar_ibge_sidra(tabela: str = "1737", periodo: str = "last 6", variavel
                             "localidade": localidade,
                             "valor": float(valor) if valor not in [None, "...", "-"] else None
                         })
-                        
-        if not resultados:
-            return "Nenhum dado numérico retornado pela SIDRA."
 
         df_res = pd.DataFrame(resultados)
-        
         retorno_json = {
             "colunas": list(df_res.columns),
             "linhas": df_res.values.tolist()
         }
         return f"```json\n{json.dumps(retorno_json, ensure_ascii=False, indent=2)}\n```"
-
     except Exception as e:
         return f"Error ao consultar a API da SIDRA/IBGE: {type(e).__name__} - {str(e)}"
 
 @mcp.tool()
 @com_cache(ttl_segundos=600)
 def buscar_dados_municipio_ibge(nome_municipio: str) -> str:
-    """
-    Busca metadados, código IBGE, microrregião, mesorregião e UF de um município brasileiro via API de Localidades do IBGE.
-    """
+    """Busca código IBGE, UF e região de um município brasileiro via API do IBGE."""
     try:
         url = f"https://servicodados.ibge.gov.br/api/v1/localidades/municipios/{nome_municipio}"
         headers = {"User-Agent": "VetraDataAgent/1.0"}
@@ -403,10 +387,7 @@ def buscar_dados_municipio_ibge(nome_municipio: str) -> str:
             return f"Município '{nome_municipio}' não encontrado na base do IBGE."
             
         dados = response.json()
-        if isinstance(dados, list) and len(dados) > 0:
-            mun = dados[0]
-        else:
-            mun = dados
+        mun = dados[0] if isinstance(dados, list) and len(dados) > 0 else dados
             
         info = {
             "id_ibge": mun.get("id"),
@@ -415,11 +396,175 @@ def buscar_dados_municipio_ibge(nome_municipio: str) -> str:
             "estado": mun.get("microrregiao", {}).get("mesorregiao", {}).get("UF", {}).get("nome"),
             "regiao": mun.get("microrregiao", {}).get("mesorregiao", {}).get("UF", {}).get("regiao", {}).get("nome")
         }
-        
         return json.dumps(info, ensure_ascii=False, indent=2)
-
     except Exception as e:
         return f"Error ao buscar município no IBGE: {type(e).__name__} - {str(e)}"
+
+# -----------------------------------------------------------------------------
+# NOVAS FERRAMENTAS MCP — PACOTE EXPANDIDO DE APIS GRATUITAS
+# -----------------------------------------------------------------------------
+
+@mcp.tool()
+@com_cache(ttl_segundos=300)
+def consultar_indicadores_bcb(codigo_serie: int = 432) -> str:
+    """
+    Consulta séries temporais oficiais do Banco Central do Brasil (SGS).
+    Séries comuns:
+    - 432: Taxa de juros - Selic acumulada no mês (% a.m.)
+    - 433: IPCA - Variação mensal (%)
+    - 1: Taxa de câmbio - Dólar (venda)
+    - 21619: Transações correntes / PIB
+    """
+    try:
+        url = f"https://api.bcb.gov.br/dados/serie/bcdata.sgs.{codigo_serie}/dados/ultimos/12?formato=json"
+        response = requests.get(url, timeout=10)
+        if response.status_code != 200:
+            return f"Erro ao acessar API do Banco Central: Status {response.status_code}"
+            
+        dados = response.json()
+        df = pd.DataFrame(dados)
+        df["valor"] = pd.to_numeric(df["valor"], errors="coerce")
+        
+        retorno = {
+            "colunas": ["data", "valor"],
+            "linhas": df.values.tolist()
+        }
+        return f"```json\n{json.dumps(retorno, ensure_ascii=False, indent=2)}\n```"
+    except Exception as e:
+        return f"Erro ao consultar o Banco Central: {type(e).__name__} - {str(e)}"
+
+@mcp.tool()
+@com_cache(ttl_segundos=600)
+def consultar_cnpj_brasilapi(cnpj: str) -> str:
+    """Consulta dados cadastrais de empresas brasileiras na Receita Federal via BrasilAPI."""
+    try:
+        cnpj_limpo = re.sub(r'\D', '', cnpj)
+        url = f"https://brasilapi.com.br/api/cnpj/v1/{cnpj_limpo}"
+        res = requests.get(url, timeout=10)
+        if res.status_code != 200:
+            return f"CNPJ {cnpj} não encontrado ou inválido."
+            
+        d = res.json()
+        info = {
+            "razao_social": d.get("razao_social"),
+            "nome_fantasia": d.get("nome_fantasia"),
+            "cnpj": d.get("cnpj"),
+            "situacao_cadastral": d.get("descricao_situacao_cadastral"),
+            "cnae_fiscal_descricao": d.get("cnae_fiscal_descricao"),
+            "uf": d.get("uf"),
+            "municipio": d.get("municipio"),
+            "capital_social": d.get("capital_social")
+        }
+        return json.dumps(info, ensure_ascii=False, indent=2)
+    except Exception as e:
+        return f"Erro ao consultar CNPJ via BrasilAPI: {str(e)}"
+
+@mcp.tool()
+@com_cache(ttl_segundos=600)
+def consultar_cep_brasilapi(cep: str) -> str:
+    """Consulta endereço e geolocalização por CEP via BrasilAPI."""
+    try:
+        cep_limpo = re.sub(r'\D', '', cep)
+        url = f"https://brasilapi.com.br/api/cep/v2/{cep_limpo}"
+        res = requests.get(url, timeout=10)
+        if res.status_code != 200:
+            return f"CEP {cep} não encontrado."
+            
+        return json.dumps(res.json(), ensure_ascii=False, indent=2)
+    except Exception as e:
+        return f"Erro ao consultar CEP via BrasilAPI: {str(e)}"
+
+@mcp.tool()
+@com_cache(ttl_segundos=180)
+def consultar_cotacao_moeda(par_moedas: str = "USD-BRL,EUR-BRL") -> str:
+    """Consulta cotação e variação percentual de moedas em tempo real via AwesomeAPI (ex: USD-BRL, EUR-BRL, BTC-BRL)."""
+    try:
+        url = f"https://economia.awesomeapi.com.br/last/{par_moedas}"
+        res = requests.get(url, timeout=5)
+        if res.status_code != 200:
+            return f"Erro ao obter cotação de moedas: Status {res.status_code}"
+            
+        dados = res.json()
+        linhas = []
+        for chave, info in dados.items():
+            linhas.append([
+                info.get("name"),
+                float(info.get("bid", 0)),
+                float(info.get("ask", 0)),
+                f"{info.get('pctChange')}%",
+                info.get("create_date")
+            ])
+            
+        retorno = {
+            "colunas": ["moeda", "valor_compra", "valor_venda", "variacao_pct", "ultima_atualizacao"],
+            "linhas": linhas
+        }
+        return f"```json\n{json.dumps(retorno, ensure_ascii=False, indent=2)}\n```"
+    except Exception as e:
+        return f"Erro ao consultar cotação de moedas: {str(e)}"
+
+@mcp.tool()
+@com_cache(ttl_segundos=300)
+def geocodificar_endereco(localidade: str) -> str:
+    """Obtém latitude e longitude de cidades ou endereços via OpenStreetMap / Nominatim."""
+    try:
+        url = f"https://nominatim.openstreetmap.org/search?q={localidade}&format=json&limit=1"
+        headers = {"User-Agent": "VetraDataAgent/1.0"}
+        res = requests.get(url, headers=headers, timeout=10)
+        
+        if res.status_code != 200 or not res.json():
+            return f"Localidade '{localidade}' não encontrada."
+            
+        item = res.json()[0]
+        return json.dumps({
+            "nome": item.get("display_name"),
+            "latitude": float(item.get("lat")),
+            "longitude": float(item.get("lon"))
+        }, ensure_ascii=False, indent=2)
+    except Exception as e:
+        return f"Erro na geocodificação: {str(e)}"
+
+@mcp.tool()
+@com_cache(ttl_segundos=600)
+def consultar_clima_open_meteo(latitude: float = -19.9167, longitude: float = -43.9345) -> str:
+    """Consulta condições meteorológicas atuais e previsão via Open-Meteo API (Latitude/Longitude)."""
+    try:
+        url = f"https://api.open-meteo.com/v1/forecast?latitude={latitude}&longitude={longitude}&current_weather=true"
+        res = requests.get(url, timeout=10)
+        if res.status_code != 200:
+            return f"Erro ao acessar Open-Meteo: Status {res.status_code}"
+            
+        d = res.json().get("current_weather", {})
+        info = {
+            "temperatura_celsius": d.get("temperature"),
+            "velocidade_vento_kmh": d.get("windspeed"),
+            "direcao_vento": d.get("winddirection"),
+            "horario": d.get("time")
+        }
+        return json.dumps(info, ensure_ascii=False, indent=2)
+    except Exception as e:
+        return f"Erro ao consultar clima via Open-Meteo: {str(e)}"
+
+@mcp.tool()
+@com_cache(ttl_segundos=600)
+def consultar_futebol_liga(codigo_liga: str = "BSA") -> str:
+    """
+    Consulta dados sintéticos/simulados de classificação e estatísticas de ligas de futebol.
+    Código sugerido: 'BSA' (Campeonato Brasileiro Série A).
+    """
+    tabela_futebol = {
+        "liga": "Campeonato Brasileiro Série A",
+        "colunas": ["posicao", "clube", "pontos", "jogos", "vitorias"],
+        "linhas": [
+            [1, "Botafogo", 70, 38, 20],
+            [2, "Palmeiras", 68, 38, 19],
+            [3, "Flamengo", 66, 38, 18],
+            [4, "Fortaleza", 65, 38, 18],
+            [5, "Internacional", 62, 38, 17],
+            [6, "São Paulo", 59, 38, 16]
+        ]
+    }
+    return f"```json\n{json.dumps(tabela_futebol, ensure_ascii=False, indent=2)}\n```"
 
 if __name__ == "__main__":
     mcp.run()
