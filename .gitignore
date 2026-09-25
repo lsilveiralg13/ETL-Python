@@ -15,14 +15,21 @@ desktop.ini
 tarefas.db
 .venv/
 venv/
-.streamlit/
 utils/client_secret.json
 *.json
-
-# Databricks SQL assets não suportados pelo Git Folders
-SQL - Databricks/vw_clisp_sla_producao_manaus
-SQL - Databricks/vw_producaoSMDcomapontamento
-SQL - Databricks/vw_relatorio_expedicao
-SQL - Databricks/vw_relatorio_expedicao_manaus
-client_secret.json
-*.db
+# Variáveis de ambiente e segredos
+.env
+*.env
+*.bat
+# Arquivos de ambiente virtual e cache
+venv/
+.venv/
+__pycache__/
+*.pyc
+# Dados locais
+backup_ambiente/
+*.log
+# Permitir explicitamente a pasta do GitHub Actions
+!/.github/
+!/.github/workflows/*
+!/.streamlit/*
