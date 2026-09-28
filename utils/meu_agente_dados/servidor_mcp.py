@@ -7,6 +7,11 @@ from typing import Optional, List, Dict, Any
 from functools import wraps
 from mcp.server.mcpserver import MCPServer
 from qdrant_client import QdrantClient
+
+# Importação dos módulos de segurança RAG
+from core.rag_guard import buscar_conhecimento_rag as rag_guard_buscar, PROMPT_SISTEMA_VETRA
+from core.api_client import requisicao_api_segura
+
 import sqlglot
 import requests
 import pandas as pd
@@ -128,7 +133,8 @@ def indexar_documento_com_chunking(
     texto: str, 
     fonte: str = "Upload Manual", 
     categoria: str = "Geral",
-    departamento: str = "TI"
+    departamento: str = "TI",
+    nivel_acesso: int = 1
 ) -> str:
     """Divide um texto longo em chunks e indexa no Qdrant Cloud com metadados ricos e PII sanitizado."""
     client = obter_cliente_qdrant()
@@ -144,6 +150,7 @@ def indexar_documento_com_chunking(
                 "fonte": fonte,
                 "categoria": categoria,
                 "departamento": departamento,
+                "nivel_acesso": nivel_acesso,
                 "chunk_index": i,
                 "total_chunks": len(chunks)
             }
@@ -161,33 +168,50 @@ def indexar_documento_com_chunking(
 
 @mcp.tool()
 @com_cache(ttl_segundos=300)
-def buscar_conhecimento_rag(termo_busca: str, limite: int = 3) -> str:
-    """Realiza busca vetorial/semântica no Qdrant Cloud."""
+def buscar_conhecimento_rag(
+    termo_busca: str, 
+    limite: int = 3, 
+    departamento_usuario: str = "TI", 
+    nivel_acesso: int = 1
+) -> str:
+    """Realiza busca vetorial/semântica no Qdrant Cloud aplicando RBAC por departamento e nível de acesso."""
     client = obter_cliente_qdrant()
     if not client:
         return "⚠️ Qdrant Cloud não configurado."
 
     try:
         resultados = None
-        if hasattr(client, "query_points"):
-            res_points = client.query_points(
-                collection_name=NOME_COLECAO,
-                query=termo_busca,
-                limit=limite
-            )
-            resultados = getattr(res_points, "points", res_points)
-        elif hasattr(client, "search"):
-            resultados = client.search(
-                collection_name=NOME_COLECAO,
-                query_text=termo_busca,
-                limit=limite
-            )
-        elif hasattr(client, "query"):
-            resultados = client.query(
-                collection_name=NOME_COLECAO,
-                query_text=termo_busca,
-                limit=limite
-            )
+        # Injeção do filtro RBAC
+        resultados = rag_guard_buscar(
+            client=client,
+            collection_name=NOME_COLECAO,
+            query_vector=termo_busca,
+            departamento_usuario=departamento_usuario,
+            nivel_acesso=nivel_acesso,
+            limit=limite
+        )
+
+        # Fallback para métodos nativos originais caso o wrapper não retorne objeto esperado
+        if resultados is None:
+            if hasattr(client, "query_points"):
+                res_points = client.query_points(
+                    collection_name=NOME_COLECAO,
+                    query=termo_busca,
+                    limit=limite
+                )
+                resultados = getattr(res_points, "points", res_points)
+            elif hasattr(client, "search"):
+                resultados = client.search(
+                    collection_name=NOME_COLECAO,
+                    query_text=termo_busca,
+                    limit=limite
+                )
+            elif hasattr(client, "query"):
+                resultados = client.query(
+                    collection_name=NOME_COLECAO,
+                    query_text=termo_busca,
+                    limit=limite
+                )
 
         if not resultados:
             return f"Nenhum documento encontrado para: '{termo_busca}'."
@@ -199,7 +223,9 @@ def buscar_conhecimento_rag(termo_busca: str, limite: int = 3) -> str:
             fonte = payload.get("fonte", "Desconhecido")
             score = round(getattr(doc, "score", 0.0), 4)
             resposta.append(f"**[{idx}] Fonte: {fonte} (Score: {score})**\n{texto}\n")
-        return "\n".join(resposta)
+        
+        contexto_recuperado = "\n".join(resposta)
+        return PROMPT_SISTEMA_VETRA.format(contexto_recuperado=contexto_recuperado)
 
     except Exception as e:
         return f"Erro na consulta RAG: {str(e)}"

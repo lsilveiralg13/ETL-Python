@@ -17,6 +17,10 @@ from mcp.client.stdio import stdio_client
 from google import genai
 from google.genai import types
 
+# Importações dos módulos centrais de resiliência e segurança
+from core.rag_guard import buscar_conhecimento_rag as rag_guard_buscar, PROMPT_SISTEMA_VETRA
+from core.api_client import requisicao_api_segura
+
 # =============================================================================
 # CONFIGURAÇÃO DA PÁGINA
 # =============================================================================
@@ -40,7 +44,7 @@ MODELOS_PREFERENCIA = [
 # Catálogo completo das ferramentas expostas pelo servidor MCP (incluindo RAG e SQL AST)
 CATALOGO_FERRAMENTAS = [
     {"nome": "validar_e_executar_sql", "descricao": "Valida via AST e Schema-Aware antes de rodar"},
-    {"nome": "buscar_conhecimento_rag", "descricao": "Busca vetorial/semântica no Qdrant Cloud com Cache"},
+    {"nome": "buscar_conhecimento_rag", "descricao": "Busca vetorial/semântica no Qdrant Cloud com Cache e RBAC"},
     {"nome": "indexar_documento_com_chunking", "descricao": "Chunking + Ingestão no Qdrant Cloud (PII Masked)"},
     {"nome": "listar_esquemas_e_tabelas", "descricao": "Lista tabelas e visões do ambiente"},
     {"nome": "descrever_estrutura_tabela", "descricao": "Traz DDL, colunas e tipos de uma tabela"},
@@ -71,6 +75,7 @@ if "preferencias_usuario" not in st.session_state:
     st.session_state.preferencias_usuario = {
         "dialeto_sql": "PostgreSQL",
         "departamento": "Engenharia de Dados",
+        "nivel_acesso": 1,
         "temperatura": 0.2,
         "mascarar_pii": True,
     }
@@ -387,10 +392,12 @@ with st.sidebar:
 
     st.markdown('<div class="vt-sep"></div>', unsafe_allow_html=True)
 
-    # UPLOAD E INGESTÃO DE DOCUMENTOS
-    st.markdown('<div class="vt-card-title">Ingestão RAG (Qdrant)</div>', unsafe_allow_html=True)
+    # UPLOAD E INGESTÃO DE DOCUMENTOS COM ATRIBUIÇÃO DE DEPARTAMENTO E RBAC
+    st.markdown('<div class="vt-card-title">Ingestão RAG (Qdrant Cloud)</div>', unsafe_allow_html=True)
     arquivo_uploaded = st.file_uploader("Carregar PDF, TXT ou CSV", type=["pdf", "txt", "csv"])
     cat_input = st.text_input("Categoria/Tag", value="Documentação Técnica")
+    dep_input = st.text_input("Departamento do Documento", value=st.session_state.preferencias_usuario.get("departamento", "TI"))
+    acesso_input = st.number_input("Nível Mínimo de Acesso Required", min_value=1, max_value=5, value=st.session_state.preferencias_usuario.get("nivel_acesso", 1))
     
     if st.button(" Indexar Arquivo no RAG", use_container_width=True) and arquivo_uploaded:
         conteudo_texto = ""
@@ -404,7 +411,7 @@ with st.sidebar:
         if conteudo_texto:
             st.session_state.pending_prompt = (
                 f"Por favor, use a ferramenta 'indexar_documento_com_chunking' para salvar o seguinte "
-                f"texto com a fonte '{arquivo_uploaded.name}' e categoria '{cat_input}':\n\n{conteudo_texto[:3000]}"
+                f"texto com a fonte '{arquivo_uploaded.name}', categoria '{cat_input}', departamento '{dep_input}' e nível de acesso '{acesso_input}':\n\n{conteudo_texto[:3000]}"
             )
             st.rerun()
 
@@ -645,7 +652,7 @@ async def processar_mcp_e_llm(prompt_usuario, historico_mensagens, dialeto_sql, 
 
                 client = genai.Client(api_key=api_key)
 
-                # MELHORIA 5: PROTOCOLO DE INSIGHTS PROATIVOS (CONSULTORIA)
+                # PROTOCOLO DE INSIGHTS PROATIVOS (CONSULTORIA)
                 system_instruction = f"""
                 Você é o Vetra, um especialista consultivo avançado em engenharia de dados, BI, RAG e SQL.
                 Sua função é ajudar o usuário a entender seus esquemas, criar queries eficientes e analisar indicadores.
@@ -654,7 +661,7 @@ async def processar_mcp_e_llm(prompt_usuario, historico_mensagens, dialeto_sql, 
                 DIRETRIZES CONSULTIVAS PROATIVAS:
                 1. Não entregue apenas números secos. Sempre contextualize resultados e indicadores (ex: OTIF, Lead Time) comparando com períodos anteriores ou metas se disponível.
                 2. Destaque tendências (altas/quedas) e identifique gargalos potenciais de forma proativa.
-                3. Se uma query envolver múltiplos JOINs, oriente o usuário sobre otimizações e filtros de data.
+                3. Se uma query envolver múltiplos JOINs, oriente o usuário sobre otimizaciones e filtros de data.
                 4. Sempre responda de forma clara, estruturada e executiva.
                 """
 
@@ -802,7 +809,7 @@ if prompt:
             resposta, modelo_usado, mcp_chamado, retorno_mcp = rodar_em_thread_limpa(prompt, historico_copia, dialeto_atual, temp_atual)
             st.markdown(resposta)
             
-            # MELHORIA 4: ESTIMATIVA DE CUSTO E PERFORMANCE (EXPLAIN PLAN)
+            # ESTIMATIVA DE CUSTO E PERFORMANCE (EXPLAIN PLAN)
             if "```sql" in resposta:
                 try:
                     sql_code = resposta.split("```sql")[1].split("```")[0].strip()
@@ -836,14 +843,14 @@ if prompt:
                     if isinstance(dados, dict) and "linhas" in dados and "colunas" in dados:
                         df_bruto = pd.DataFrame(dados["linhas"], columns=dados["colunas"])
                         
-                        # MELHORIA 1: PROTOCOLO DE SANITY CHECK (QUALIDADE)
+                        # PROTOCOLO DE SANITY CHECK (QUALIDADE)
                         alertas_qualidade = executar_sanity_check_df(df_bruto)
                         if alertas_qualidade:
                             with st.expander("🛡️ Relatório de Qualidade de Dados (Sanity Check)", expanded=True):
                                 for al in alertas_qualidade:
                                     st.warning(al)
 
-                        # MELHORIA 2: MASCARAMENTO DE PII (LGPD)
+                        # MASCARAMENTO DE PII (LGPD)
                         if st.session_state.preferencias_usuario.get("mascarar_pii", True):
                             df_exibicao, cols_mascaradas = aplicar_mascaramento_pii(df_bruto)
                             if cols_mascaradas:
@@ -903,7 +910,7 @@ if prompt:
                 except Exception as e:
                     st.warning(f"Não foi possível renderizar a visualização tabular/gráfica: {e}")
 
-            # MELHORIA 3: LOOP DE FEEDBACK DO RAG & AVALIAÇÃO TRIAD
+            # LOOP DE FEEDBACK DO RAG & AVALIAÇÃO TRIAD
             if mcp_chamado and retorno_mcp and "buscar_conhecimento_rag" in str(retorno_mcp):
                 st.markdown("---")
                 st.markdown("##### 🎯 Avaliação RAG Triad & Contexto Retornado")
