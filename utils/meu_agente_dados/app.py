@@ -44,9 +44,10 @@ CAMINHO_SERVIDOR = os.path.join(DIR_ATUAL, "servidor_mcp.py")
 
 # Lista de modelos válidos e recomendados pela API
 MODELOS_PREFERENCIA = [
-    "gemini-3-flash-preview",
-    "gemini-2.5-flash",
-    "gemini-3.5-flash-lite",
+    "gemini-2.5-flash",        # Mais estável em produção e com cota alta
+    "gemini-2.5-pro",          # Alta capacidade de raciocínio
+    "gemini-1.5-flash",        # Excelente fallback rápido
+    "gemini-3-flash-preview",  # Preview mantido como última opção da família Gemini
 ]
 
 # Catálogo completo das ferramentas expostas pelo servidor MCP (incluindo RAG e SQL AST)
