@@ -621,7 +621,7 @@ def chamar_llm_multi_provedor(client_gemini, contents, config, prompt_usuario):
                 {"role": "system", "content": sys_instruction},
                 {"role": "user", "content": prompt_usuario}
             ],
-            model="llama-3.3-70b-versatile",
+            model="llama-3.1-8b-instant",
             temperature=getattr(config, 'temperature', 0.2),
         )
         
@@ -634,7 +634,7 @@ def chamar_llm_multi_provedor(client_gemini, contents, config, prompt_usuario):
                 self.function_calls = None
                 self.candidates = []
 
-        return RespostaGroqMock(texto_resposta), "groq/llama-3.3-70b"
+        return RespostaGroqMock(texto_resposta), "groq/llama-3.1-8b-instant"
 
     except Exception as err_groq:
         print(f"❌ Erro crítico na Groq: {err_groq}", file=sys.stderr)
