@@ -48,6 +48,7 @@ MODELOS_PREFERENCIA = [
     "gemini-2.5-pro",          # Alta capacidade de raciocínio
     "gemini-1.5-flash",        # Excelente fallback rápido
     "gemini-3-flash-preview",  # Preview mantido como última opção da família Gemini
+    "llama-3.3-70b-versatile"  # API llama 3.3 70B (Groq Cloud) como fallback final
 ]
 
 # Catálogo completo das ferramentas expostas pelo servidor MCP (incluindo RAG e SQL AST)
@@ -620,7 +621,7 @@ def chamar_llm_multi_provedor(client_gemini, contents, config, prompt_usuario):
                 {"role": "system", "content": sys_instruction},
                 {"role": "user", "content": prompt_usuario}
             ],
-            model="llama3-70b-8192",
+            model="llama-3.3-70b-versatile",
             temperature=getattr(config, 'temperature', 0.2),
         )
         
