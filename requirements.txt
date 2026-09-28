@@ -115,6 +115,7 @@ googlemaps
 greenback
 greenlet
 grpcio
+groq
 gunicorn
 h11
 h2

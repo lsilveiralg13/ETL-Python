@@ -27,6 +27,8 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from google import genai
 from google.genai import types
+from groq import Groq
+
 
 # =============================================================================
 # CONFIGURAÇÃO DA PÁGINA
@@ -631,6 +633,46 @@ def chamar_gemini_com_fallback(client, contents, config):
             raise e
 
     raise ultimo_erro
+
+## Nova função para chamar o groq em caso de falhas do Gemini
+
+from groq import Groq
+
+def chamar_llm_multi_provedor(client_gemini, contents, config, prompt_usuario):
+    # 1. TENTATIVA COM GEMINI (Seus modelos existentes)
+    try:
+        response, modelo = chamar_gemini_com_fallback(client_gemini, contents, config)
+        return response, modelo
+    except Exception as e:
+        print(f"⚠️ Gemini indisponível (503/429). Redirecionando para Groq Cloud...", file=sys.stderr)
+
+    # 2. FALLBACK GRATUITO VIA GROQ CLOUD (Llama 3.3 70B)
+    api_key_groq = os.environ.get("GROQ_API_KEY")
+    if api_key_groq:
+        try:
+            client_groq = Groq(api_key=api_key_groq)
+            chat_completion = client_groq.chat.completions.create(
+                messages=[
+                    {"role": "system", "content": config.system_instruction},
+                    {"role": "user", "content": prompt_usuario}
+                ],
+                model="llama-3.3-70b-versatile",
+                temperature=config.temperature,
+            )
+            texto_resposta = chat_completion.choices[0].message.content
+            
+            # Encapsula na estrutura esperada pelo app.py
+            class RespostaGroqMock:
+                def __init__(self, text):
+                    self.text = text
+                    self.function_calls = None
+                    self.candidates = []
+
+            return RespostaGroqMock(texto_resposta), "groq/llama-3.3-70b"
+        except Exception as err_groq:
+            print(f"❌ Erro no fallback do Groq: {err_groq}", file=sys.stderr)
+
+    raise Exception("Todos os provedores de LLM gratuitos estão indisponíveis no momento.")
 
 # =============================================================================
 # PROCESSAMENTO PRINCIPAL (MCP + GEMINI)
