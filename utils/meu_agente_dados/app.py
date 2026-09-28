@@ -44,12 +44,11 @@ st.set_page_config(
 
 CAMINHO_SERVIDOR = os.path.join(DIR_ATUAL, "servidor_mcp.py")
 
-# Lista de modelos válidos e recomendados pela API
+# Lista de modelos válidos e recomendados estritamente da Google Gemini API
 MODELOS_PREFERENCIA = [
     "gemini-3.8-flash",         # Modelo principal recomendado pela Google
     "gemini-3.1-pro-preview",   # Modelo Pro recomendado
     "gemini-3-flash-preview",   # Modelo Preview ativo
-    "llama-3.3-70b-versatile"   # API llama 3.3 70B (Groq Cloud) como fallback final
 ]
 
 # Catálogo completo das ferramentas expostas pelo servidor MCP (incluindo RAG e SQL AST)
@@ -391,7 +390,7 @@ with st.sidebar:
     )
     st.markdown('<div class="vt-sep"></div>', unsafe_allow_html=True)
 
-    chave_configurada = bool(os.environ.get("GEMINI_API_KEY"))
+    chave_configurada = bool(os.environ.get("GEMINI_API_KEY") or st.secrets.get("GEMINI_API_KEY", None))
     status_texto = "Chave detectada" if chave_configurada else "Chave ausente"
     st.markdown(
         f"""
@@ -559,7 +558,7 @@ def obter_schema_tool(tool):
 
 
 def extrair_texto_da_resposta(response):
-    """Extrai exaustivamente qualquer texto retornado na resposta da Gemini API."""
+    """Extrai exaustivamente qualquer texto retornado na resposta da Gemini API ou Mocks."""
     partes_texto = []
 
     try:
@@ -583,7 +582,7 @@ def extrair_texto_da_resposta(response):
     return "\n".join(resultado_limpo).strip()
 
 # -----------------------------------------------------------------------------
-# CIRCUIT BREAKER MEMOIZATION (DICIONÁRIO GLOBAL SEGURO)
+# CIRCUIT BREAKER MEMOIZATION (DICIONÁRIO GLOBAL SEGURO PARA THREADS)
 # -----------------------------------------------------------------------------
 PROVEDORES_BLOQUEADOS = {}
 
@@ -603,15 +602,15 @@ def marcar_falha(provedor: str, minutos: int = 3):
 
 
 # -----------------------------------------------------------------------------
-# ESTEIRA MULTI-PROVEDOR COM CIRCUIT BREAKER AUTOMÁTICO
+# ESTEIRA MULTI-PROVEDOR COM CIRCUIT BREAKER AUTOMÁTICO E SANITIZAÇÃO
 # -----------------------------------------------------------------------------
 def chamar_llm_multi_provedor(client_gemini, contents, config, prompt_usuario):
     """
     Esteira de Resiliência Multi-Provedor com isolamento por Circuit Breaker:
-    1. Google Gemini API (Se não estiver bloqueado)
-    2. Groq Cloud (Se não estiver bloqueado)
-    3. OpenRouter Free (Se não estiver bloqueado)
-    4. GitHub Models / Azure AI (Última retaguarda)
+    1. Google Gemini API (Modelos da lista MODELOS_PREFERENCIA)
+    2. Groq Cloud (Llama 3.3 70B / 3.1 8B)
+    3. OpenRouter Free (Roteador Multi-Modelo)
+    4. GitHub Models / Azure AI (GPT-4o-mini Free)
     """
     sys_instruction = str(config.system_instruction) if hasattr(config, 'system_instruction') and config.system_instruction else ""
     temp = getattr(config, 'temperature', 0.2)
@@ -642,36 +641,46 @@ def chamar_llm_multi_provedor(client_gemini, contents, config, prompt_usuario):
         marcar_falha("gemini", minutos=3)
 
     # =========================================================================
-    # CAMADA 2: GROQ CLOUD (Llama 3.1 8B Instant)
+    # CAMADA 2: GROQ CLOUD (Llama 3.3 70B / 3.1 8B Instant)
     # =========================================================================
     if not esta_bloqueado("groq"):
-        api_key_groq = os.environ.get("GROQ_API_KEY") or st.secrets.get("GROQ_API_KEY", None)
-        if api_key_groq:
+        api_key_groq_raw = os.environ.get("GROQ_API_KEY") or st.secrets.get("GROQ_API_KEY", None)
+        if api_key_groq_raw:
+            api_key_groq = str(api_key_groq_raw).strip().replace('"', '').replace("'", "")
             try:
                 client_groq = Groq(api_key=api_key_groq)
-                chat_completion = client_groq.chat.completions.create(
-                    messages=[
-                        {"role": "system", "content": sys_instruction},
-                        {"role": "user", "content": prompt_usuario}
-                    ],
-                    model="llama-3.1-8b-instant",
-                    temperature=temp,
-                )
-                return RespostaMock(chat_completion.choices[0].message.content), "groq/llama-3.1-8b-instant"
+                
+                # Tenta primeiro o modelo Llama 3.3 70B e faz fallback interno para o 8B em caso de limitação de cota
+                modelos_groq = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]
+                for m_groq in modelos_groq:
+                    try:
+                        chat_completion = client_groq.chat.completions.create(
+                            messages=[
+                                {"role": "system", "content": sys_instruction},
+                                {"role": "user", "content": prompt_usuario}
+                            ],
+                            model=m_groq,
+                            temperature=temp,
+                        )
+                        return RespostaMock(chat_completion.choices[0].message.content), f"groq/{m_groq}"
+                    except Exception as err_m_groq:
+                        print(f"⚠️ [Groq Sub-model '{m_groq}'] Falhou: {err_m_groq}", file=sys.stderr)
+                        continue
             except Exception as err_groq:
-                print(f"⚠️ [Groq] Falhou: {err_groq}", file=sys.stderr)
+                print(f"⚠️ [Groq Client] Falhou: {err_groq}", file=sys.stderr)
                 marcar_falha("groq", minutos=5)
 
     # =========================================================================
     # CAMADA 3: OPENROUTER (Modelos Gratuitos Roteados)
     # =========================================================================
     if not esta_bloqueado("openrouter"):
-        api_key_openrouter = os.environ.get("OPENROUTER_API_KEY") or st.secrets.get("OPENROUTER_API_KEY", None)
-        if api_key_openrouter:
+        api_key_or_raw = os.environ.get("OPENROUTER_API_KEY") or st.secrets.get("OPENROUTER_API_KEY", None)
+        if api_key_or_raw:
+            api_key_or = str(api_key_or_raw).strip().replace('"', '').replace("'", "")
             try:
                 client_or = OpenAI(
                     base_url="https://openrouter.ai/api/v1",
-                    api_key=api_key_openrouter,
+                    api_key=api_key_or,
                 )
                 completion = client_or.chat.completions.create(
                     model="meta-llama/llama-3.3-70b-instruct:free",
@@ -689,12 +698,13 @@ def chamar_llm_multi_provedor(client_gemini, contents, config, prompt_usuario):
     # =========================================================================
     # CAMADA 4: GITHUB MODELS / AZURE AI (GPT-4o-mini Free)
     # =========================================================================
-    api_key_github = os.environ.get("GITHUB_TOKEN") or st.secrets.get("GITHUB_TOKEN", None)
-    if api_key_github:
+    api_key_gh_raw = os.environ.get("GITHUB_TOKEN") or st.secrets.get("GITHUB_TOKEN", None)
+    if api_key_gh_raw:
+        api_key_gh = str(api_key_gh_raw).strip().replace('"', '').replace("'", "")
         try:
             client_gh = OpenAI(
                 base_url="https://models.inference.ai.azure.com",
-                api_key=api_key_github,
+                api_key=api_key_gh,
             )
             completion = client_gh.chat.completions.create(
                 model="gpt-4o-mini",
@@ -709,15 +719,16 @@ def chamar_llm_multi_provedor(client_gemini, contents, config, prompt_usuario):
             print(f"❌ [GitHub Models] Falhou: {err_gh}", file=sys.stderr)
 
     raise Exception("Todos os provedores de LLM estão temporariamente bloqueados ou indisponíveis.")
+
 # =============================================================================
-# PROCESSAMENTO PRINCIPAL (MCP + GEMINI)
+# PROCESSAMENTO PRINCIPAL (MCP + LLM MULTI-PROVEDOR)
 # =============================================================================
 async def processar_mcp_e_llm(prompt_usuario, historico_mensagens, dialeto_sql, temperatura=0.2):
-    api_key_raw = os.environ.get("GEMINI_API_KEY", "")
-    api_key = api_key_raw.replace('"', '').replace("'", "").replace('\n', '').replace('\r', '').strip()
+    api_key_raw = os.environ.get("GEMINI_API_KEY", "") or st.secrets.get("GEMINI_API_KEY", "")
+    api_key = str(api_key_raw).replace('"', '').replace("'", "").replace('\n', '').replace('\r', '').strip()
 
     if not api_key:
-        return "⚠️ Erro: A variável de ambiente GEMINI_API_KEY não foi configurada. Defina-a no seu arquivo .env ou terminal.", None, False, None
+        return "⚠️ Erro: A variável de ambiente GEMINI_API_KEY não foi configurada. Defina-a no seu arquivo .env ou Secrets.", None, False, None
 
     env_vars = dict(os.environ)
     env_vars["PYTHONUNBUFFERED"] = "1"
@@ -762,7 +773,7 @@ async def processar_mcp_e_llm(prompt_usuario, historico_mensagens, dialeto_sql, 
 
                 client = genai.Client(api_key=api_key)
 
-                # MELHORIA 5: PROTOCOLO DE INSIGHTS PROATIVOS (CONSULTORIA)
+                # PROTOCOLO DE INSIGHTS PROATIVOS (CONSULTORIA)
                 system_instruction = f"""
                 Você é o Vetra, um especialista consultivo avançado em engenharia de dados, BI, RAG e SQL.
                 Sua função é ajudar o usuário a entender seus esquemas, criar queries eficientes e analisar indicadores.
@@ -798,7 +809,7 @@ async def processar_mcp_e_llm(prompt_usuario, historico_mensagens, dialeto_sql, 
                 MAX_PASSOS_MCP = 5
                 passo_atual = 0
 
-                while response.function_calls and passo_atual < MAX_PASSOS_MCP:
+                while getattr(response, "function_calls", None) and passo_atual < MAX_PASSOS_MCP:
                     passo_atual += 1
                     function_call = response.function_calls[0]
                     tool_name = function_call.name
@@ -919,7 +930,7 @@ if prompt:
             resposta, modelo_usado, mcp_chamado, retorno_mcp = rodar_em_thread_limpa(prompt, historico_copia, dialeto_atual, temp_atual)
             st.markdown(resposta)
             
-            # MELHORIA 4: ESTIMATIVA DE CUSTO E PERFORMANCE (EXPLAIN PLAN)
+            # ESTIMATIVA DE CUSTO E PERFORMANCE (EXPLAIN PLAN)
             if "```sql" in resposta:
                 try:
                     sql_code = resposta.split("```sql")[1].split("```")[0].strip()
@@ -953,14 +964,14 @@ if prompt:
                     if isinstance(dados, dict) and "linhas" in dados and "colunas" in dados:
                         df_bruto = pd.DataFrame(dados["linhas"], columns=dados["colunas"])
                         
-                        # MELHORIA 1: PROTOCOLO DE SANITY CHECK (QUALIDADE)
+                        # PROTOCOLO DE SANITY CHECK (QUALIDADE)
                         alertas_qualidade = executar_sanity_check_df(df_bruto)
                         if alertas_qualidade:
                             with st.expander("🛡️ Relatório de Qualidade de Dados (Sanity Check)", expanded=True):
                                 for al in alertas_qualidade:
                                     st.warning(al)
 
-                        # MELHORIA 2: MASCARAMENTO DE PII (LGPD)
+                        # MASCARAMENTO DE PII (LGPD)
                         if st.session_state.preferencias_usuario.get("mascarar_pii", True):
                             df_exibicao, cols_mascaradas = aplicar_mascaramento_pii(df_bruto)
                             if cols_mascaradas:
@@ -1020,7 +1031,7 @@ if prompt:
                 except Exception as e:
                     st.warning(f"Não foi possível renderizar a visualização tabular/gráfica: {e}")
 
-            # MELHORIA 3: LOOP DE FEEDBACK DO RAG & AVALIAÇÃO TRIAD
+            # LOOP DE FEEDBACK DO RAG & AVALIAÇÃO TRIAD
             if mcp_chamado and retorno_mcp and "buscar_conhecimento_rag" in str(retorno_mcp):
                 st.markdown("---")
                 st.markdown("##### 🎯 Avaliação RAG Triad & Contexto Retornado")
