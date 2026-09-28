@@ -580,6 +580,7 @@ def extrair_texto_da_resposta(response):
 
 def chamar_gemini_com_fallback(client, contents, config):
     ultimo_erro = None
+
     for modelo in MODELOS_PREFERENCIA:
         try:
             response = client.models.generate_content(
@@ -588,18 +589,47 @@ def chamar_gemini_com_fallback(client, contents, config):
                 config=config,
             )
             return response, modelo
+
         except Exception as e:
             ultimo_erro = e
             msg_erro = str(e).lower()
-            codigo = getattr(e, 'code', None)
-            status = getattr(e, 'status', '')
-            
-            termo_cota = "resource_exhausted" in msg_erro or "quota" in msg_erro or "rate_limits" in msg_erro or "429" in msg_erro
-            termo_indisponivel = "unavailable" in msg_erro or "not_found" in msg_erro or "404" in msg_erro or "503" in msg_erro or "high demand" in msg_erro
-            
-            if codigo in (429, 503, 500, 404) or "503" in str(status) or termo_cota or termo_indisponivel:
+
+            # Extração agressiva de códigos de status HTTP
+            codigo = getattr(e, "code", None)
+            status_code = getattr(e, "status_code", None)
+            status = getattr(e, "status", "")
+
+            # Mapeamento estendido de erros de capacidade/servidor/cota
+            e_erro_temporario = (
+                codigo in (429, 500, 502, 503, 504, 404)
+                or status_code in (429, 500, 502, 503, 504, 404)
+                or any(
+                    err in msg_erro
+                    for err in [
+                        "503",
+                        "429",
+                        "unavailable",
+                        "high demand",
+                        "resource_exhausted",
+                        "quota",
+                        "rate_limit",
+                        "overloaded",
+                        "temporarily unavailable",
+                        "server error",
+                    ]
+                )
+            )
+
+            if e_erro_temporario:
+                print(
+                    f"⚠️ Modelo '{modelo}' indisponível ou em alta demanda. Redirecionando fallback...",
+                    file=sys.stderr,
+                )
                 continue
+
+            # Se for um erro crítico não recuperável (ex: chave inválida), interrompe o loop
             raise e
+
     raise ultimo_erro
 
 # =============================================================================
