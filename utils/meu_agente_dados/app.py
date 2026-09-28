@@ -723,7 +723,7 @@ async def processar_mcp_e_llm(prompt_usuario, historico_mensagens, dialeto_sql, 
                     temperature=temperatura,
                 )
 
-                response, modelo_usado = chamar_llm_multi_provedor(client, contents, config, prompt_completo)
+                response, modelo_usado = chamar_llm_multi_provedor(client, contents, config, prompt_usuario)
 
                 MAX_PASSOS_MCP = 5
                 passo_atual = 0
