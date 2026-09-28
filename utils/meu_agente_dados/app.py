@@ -28,6 +28,7 @@ from mcp.client.stdio import stdio_client
 from google import genai
 from google.genai import types
 from groq import Groq
+from openai import OpenAI
 
 
 # =============================================================================
@@ -586,10 +587,25 @@ def extrair_texto_da_resposta(response):
 # -----------------------------------------------------------------------------
 def chamar_llm_multi_provedor(client_gemini, contents, config, prompt_usuario):
     """
-    Testa todos os modelos Gemini em sequencia. Se QUALQUER erro ocorrer em todos eles
-    (503 High Demand, 429, Timeout, etc.), redireciona para o Groq Cloud (Llama 3.3 70B).
+    Esteira de Resiliência Multi-Provedor (Fallback Chain):
+    1. Google Gemini API (Modelos da lista MODELOS_PREFERENCIA)
+    2. Groq Cloud (Llama 3.1 8B Instant)
+    3. OpenRouter (Llama 3.3 70B / DeepSeek Free)
+    4. GitHub Models / Azure AI (GPT-4o-mini Free)
     """
-    # 1. Tenta a lista de modelos Gemini em sequência
+    sys_instruction = str(config.system_instruction) if hasattr(config, 'system_instruction') and config.system_instruction else ""
+    temp = getattr(config, 'temperature', 0.2)
+
+    # Mock para manter compatibilidade com a interface de atributos do Gemini no app.py
+    class RespostaMock:
+        def __init__(self, text):
+            self.text = text
+            self.function_calls = None
+            self.candidates = []
+
+    # =========================================================================
+    # CAMADA 1: GOOGLE GEMINI API
+    # =========================================================================
     for modelo in MODELOS_PREFERENCIA:
         try:
             response = client_gemini.models.generate_content(
@@ -597,49 +613,77 @@ def chamar_llm_multi_provedor(client_gemini, contents, config, prompt_usuario):
                 contents=contents,
                 config=config,
             )
-            return response, modelo
+            return response, f"gemini/{modelo}"
         except Exception as e:
-            # Imprime o aviso nos logs do terminal/Streamlit, mas NÃO interrompe a execução
-            print(f"⚠️ Modelo Gemini '{modelo}' indisponível: {e}. Testando próximo...", file=sys.stderr)
+            print(f"⚠️ [Camada 1] Gemini '{modelo}' falhou: {e}. Testando próximo...", file=sys.stderr)
             continue
 
-    # 2. Se TODOS os modelos do Gemini falharem, aciona o Groq como salvaguarda
-    print("🚨 Todos os modelos Gemini indisponíveis (503/429). Disparando Groq Cloud...", file=sys.stderr)
-    
-    api_key_groq = os.environ.get("GROQ_API_KEY") or st.secrets.get("GROQ_API_KEY")
-    if not api_key_groq:
-        raise Exception("Erro 503/Indisponibilidade no Gemini e GROQ_API_KEY não foi encontrada nas Secrets.")
+    print("🚨 All Gemini models failed. Activating Multi-Provider Fallback Chain...", file=sys.stderr)
 
-    try:
-        client_groq = Groq(api_key=api_key_groq)
-        
-        # Garante a conversão correta da instrução do sistema
-        sys_instruction = str(config.system_instruction) if hasattr(config, 'system_instruction') and config.system_instruction else ""
-        
-        chat_completion = client_groq.chat.completions.create(
-            messages=[
-                {"role": "system", "content": sys_instruction},
-                {"role": "user", "content": prompt_usuario}
-            ],
-            model="llama-3.1-8b-instant",
-            temperature=getattr(config, 'temperature', 0.2),
-        )
-        
-        texto_resposta = chat_completion.choices[0].message.content
-        
-        # Mock para manter compatibilidade com a interface de atributos do Gemini no app.py
-        class RespostaGroqMock:
-            def __init__(self, text):
-                self.text = text
-                self.function_calls = None
-                self.candidates = []
+    # =========================================================================
+    # CAMADA 2: GROQ CLOUD (Llama 3.1 8B Instant)
+    # =========================================================================
+    api_key_groq = os.environ.get("GROQ_API_KEY") or st.secrets.get("GROQ_API_KEY", None)
+    if api_key_groq:
+        try:
+            client_groq = Groq(api_key=api_key_groq)
+            chat_completion = client_groq.chat.completions.create(
+                messages=[
+                    {"role": "system", "content": sys_instruction},
+                    {"role": "user", "content": prompt_usuario}
+                ],
+                model="llama-3.1-8b-instant",
+                temperature=temp,
+            )
+            return RespostaMock(chat_completion.choices[0].message.content), "groq/llama-3.1-8b-instant"
+        except Exception as err_groq:
+            print(f"⚠️ [Camada 2] Groq falhou: {err_groq}. Acionando OpenRouter...", file=sys.stderr)
 
-        return RespostaGroqMock(texto_resposta), "groq/llama-3.1-8b-instant"
+    # =========================================================================
+    # CAMADA 3: OPENROUTER (Modelos Gratuitos Roteados)
+    # =========================================================================
+    api_key_openrouter = os.environ.get("OPENROUTER_API_KEY") or st.secrets.get("OPENROUTER_API_KEY", None)
+    if api_key_openrouter:
+        try:
+            client_or = OpenAI(
+                base_url="https://openrouter.ai/api/v1",
+                api_key=api_key_openrouter,
+            )
+            completion = client_or.chat.completions.create(
+                model="meta-llama/llama-3.3-70b-instruct:free",
+                messages=[
+                    {"role": "system", "content": sys_instruction},
+                    {"role": "user", "content": prompt_usuario}
+                ],
+                temperature=temp,
+            )
+            return RespostaMock(completion.choices[0].message.content), "openrouter/llama-3.3-70b:free"
+        except Exception as err_or:
+            print(f"⚠️ [Camada 3] OpenRouter falhou: {err_or}. Acionando GitHub Models...", file=sys.stderr)
 
-    except Exception as err_groq:
-        print(f"❌ Erro crítico na Groq: {err_groq}", file=sys.stderr)
-        raise Exception(f"Provedores de LLM indisponíveis. Erro Groq: {err_groq}")
+    # =========================================================================
+    # CAMADA 4: GITHUB MODELS / AZURE AI (GPT-4o-mini Free)
+    # =========================================================================
+    api_key_github = os.environ.get("GITHUB_TOKEN") or st.secrets.get("GITHUB_TOKEN", None)
+    if api_key_github:
+        try:
+            client_gh = OpenAI(
+                base_url="https://models.inference.ai.azure.com",
+                api_key=api_key_github,
+            )
+            completion = client_gh.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": sys_instruction},
+                    {"role": "user", "content": prompt_usuario}
+                ],
+                temperature=temp,
+            )
+            return RespostaMock(completion.choices[0].message.content), "github/gpt-4o-mini"
+        except Exception as err_gh:
+            print(f"❌ [Camada 4] GitHub Models falhou: {err_gh}", file=sys.stderr)
 
+    raise Exception("Todos os 4 provedores de LLM gratuitos estão indisponíveis no momento.")
 # =============================================================================
 # PROCESSAMENTO PRINCIPAL (MCP + GEMINI)
 # =============================================================================
