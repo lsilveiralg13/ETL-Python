@@ -580,100 +580,64 @@ def extrair_texto_da_resposta(response):
 
     return "\n".join(resultado_limpo).strip()
 
-
-def chamar_gemini_com_fallback(client, contents, config):
-    ultimo_erro = None
-
+# -----------------------------------------------------------------------------
+# FUNÇÃO DE LLM MULTI-PROVEDOR (CAPTURADOR TOTAL DE ERROS GEMINI -> FALLBACK GROQ)
+# -----------------------------------------------------------------------------
+def chamar_llm_multi_provedor(client_gemini, contents, config, prompt_usuario):
+    """
+    Testa todos os modelos Gemini em sequencia. Se QUALQUER erro ocorrer em todos eles
+    (503 High Demand, 429, Timeout, etc.), redireciona para o Groq Cloud (Llama 3.3 70B).
+    """
+    # 1. Tenta a lista de modelos Gemini em sequência
     for modelo in MODELOS_PREFERENCIA:
         try:
-            response = client.models.generate_content(
+            response = client_gemini.models.generate_content(
                 model=modelo,
                 contents=contents,
                 config=config,
             )
             return response, modelo
-
         except Exception as e:
-            ultimo_erro = e
-            msg_erro = str(e).lower()
+            # Imprime o aviso nos logs do terminal/Streamlit, mas NÃO interrompe a execução
+            print(f"⚠️ Modelo Gemini '{modelo}' indisponível: {e}. Testando próximo...", file=sys.stderr)
+            continue
 
-            # Extração agressiva de códigos de status HTTP
-            codigo = getattr(e, "code", None)
-            status_code = getattr(e, "status_code", None)
-            status = getattr(e, "status", "")
+    # 2. Se TODOS os modelos do Gemini falharem, aciona o Groq como salvaguarda
+    print("🚨 Todos os modelos Gemini indisponíveis (503/429). Disparando Groq Cloud...", file=sys.stderr)
+    
+    api_key_groq = os.environ.get("GROQ_API_KEY") or st.secrets.get("GROQ_API_KEY")
+    if not api_key_groq:
+        raise Exception("Erro 503/Indisponibilidade no Gemini e GROQ_API_KEY não foi encontrada nas Secrets.")
 
-            # Mapeamento estendido de erros de capacidade/servidor/cota
-            e_erro_temporario = (
-                codigo in (429, 500, 502, 503, 504, 404)
-                or status_code in (429, 500, 502, 503, 504, 404)
-                or any(
-                    err in msg_erro
-                    for err in [
-                        "503",
-                        "429",
-                        "unavailable",
-                        "high demand",
-                        "resource_exhausted",
-                        "quota",
-                        "rate_limit",
-                        "overloaded",
-                        "temporarily unavailable",
-                        "server error",
-                    ]
-                )
-            )
-
-            if e_erro_temporario:
-                print(
-                    f"⚠️ Modelo '{modelo}' indisponível ou em alta demanda. Redirecionando fallback...",
-                    file=sys.stderr,
-                )
-                continue
-
-            # Se for um erro crítico não recuperável (ex: chave inválida), interrompe o loop
-            raise e
-
-    raise ultimo_erro
-
-## Nova função para chamar o groq em caso de falhas do Gemini
-
-from groq import Groq
-
-def chamar_llm_multi_provedor(client_gemini, contents, config, prompt_usuario):
-    # 1. TENTATIVA COM GEMINI (Seus modelos existentes)
     try:
-        response, modelo = chamar_gemini_com_fallback(client_gemini, contents, config)
-        return response, modelo
-    except Exception as e:
-        print(f"⚠️ Gemini indisponível (503/429). Redirecionando para Groq Cloud...", file=sys.stderr)
+        client_groq = Groq(api_key=api_key_groq)
+        
+        # Garante a conversão correta da instrução do sistema
+        sys_instruction = str(config.system_instruction) if hasattr(config, 'system_instruction') and config.system_instruction else ""
+        
+        chat_completion = client_groq.chat.completions.create(
+            messages=[
+                {"role": "system", "content": sys_instruction},
+                {"role": "user", "content": prompt_usuario}
+            ],
+            model="llama-3.3-70b-versatile",
+            temperature=getattr(config, 'temperature', 0.2),
+        )
+        
+        texto_resposta = chat_completion.choices[0].message.content
+        
+        # Mock para manter compatibilidade com a interface de atributos do Gemini no app.py
+        class RespostaGroqMock:
+            def __init__(self, text):
+                self.text = text
+                self.function_calls = None
+                self.candidates = []
 
-    # 2. FALLBACK GRATUITO VIA GROQ CLOUD (Llama 3.3 70B)
-    api_key_groq = os.environ.get("GROQ_API_KEY")
-    if api_key_groq:
-        try:
-            client_groq = Groq(api_key=api_key_groq)
-            chat_completion = client_groq.chat.completions.create(
-                messages=[
-                    {"role": "system", "content": config.system_instruction},
-                    {"role": "user", "content": prompt_usuario}
-                ],
-                model="llama-3.3-70b-versatile",
-                temperature=config.temperature,
-            )
-            texto_resposta = chat_completion.choices[0].message.content
-            
-            # Encapsula na estrutura esperada pelo app.py
-            class RespostaGroqMock:
-                def __init__(self, text):
-                    self.text = text
-                    self.function_calls = None
-                    self.candidates = []
+        return RespostaGroqMock(texto_resposta), "groq/llama-3.3-70b"
 
-            return RespostaGroqMock(texto_resposta), "groq/llama-3.3-70b"
-        except Exception as err_groq:
-            print(f"❌ Erro no fallback do Groq: {err_groq}", file=sys.stderr)
-
-    raise Exception("Todos os provedores de LLM gratuitos estão indisponíveis no momento.")
+    except Exception as err_groq:
+        print(f"❌ Erro crítico na Groq: {err_groq}", file=sys.stderr)
+        raise Exception(f"Provedores de LLM indisponíveis. Erro Groq: {err_groq}")
 
 # =============================================================================
 # PROCESSAMENTO PRINCIPAL (MCP + GEMINI)
@@ -759,7 +723,7 @@ async def processar_mcp_e_llm(prompt_usuario, historico_mensagens, dialeto_sql, 
                     temperature=temperatura,
                 )
 
-                response, modelo_usado = chamar_gemini_com_fallback(client, contents, config)
+                response, modelo_usado = chamar_llm_multi_provedor(client, contents, config, prompt_completo)
 
                 MAX_PASSOS_MCP = 5
                 passo_atual = 0
