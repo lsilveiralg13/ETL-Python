@@ -1,5 +1,6 @@
 import os
 import sys
+import time
 
 # Garante que a raiz do projeto (onde está a pasta 'core') seja encontrada pelo Python
 DIR_ATUAL = os.path.dirname(os.path.abspath(__file__))
@@ -583,20 +584,41 @@ def extrair_texto_da_resposta(response):
     return "\n".join(resultado_limpo).strip()
 
 # -----------------------------------------------------------------------------
-# FUNÇÃO DE LLM MULTI-PROVEDOR (CAPTURADOR TOTAL DE ERROS GEMINI -> FALLBACK GROQ)
+# CIRCUIT BREAKER MEMOIZATION (GERENCIAMENTO DINÂMICO DE FALHAS)
+# -----------------------------------------------------------------------------
+if "provedores_bloqueados" not in st.session_state:
+    st.session_state.provedores_bloqueados = {}
+
+def esta_bloqueado(provedor: str) -> bool:
+    """Verifica se o provedor está temporariamente marcado como OFFLINE."""
+    agora = time.time()
+    bloqueados = st.session_state.provedores_bloqueados
+    if provedor in bloqueados:
+        if agora < bloqueados[provedor]:
+            return True
+        del bloqueados[provedor]  # Bloqueio expirou, permite nova tentativa
+    return False
+
+def marcar_falha(provedor: str, minutos: int = 3):
+    """Marca o provedor como OFFLINE por X minutos após um erro 503/Indisponibilidade."""
+    st.session_state.provedores_bloqueados[provedor] = time.time() + (minutos * 60)
+    print(f"🚫 Circuit Breaker: Provedor '{provedor}' marcado como OFFLINE por {minutos} min.", file=sys.stderr)
+
+
+# -----------------------------------------------------------------------------
+# ESTEIRA MULTI-PROVEDOR COM CIRCUIT BREAKER AUTOMÁTICO
 # -----------------------------------------------------------------------------
 def chamar_llm_multi_provedor(client_gemini, contents, config, prompt_usuario):
     """
-    Esteira de Resiliência Multi-Provedor (Fallback Chain):
-    1. Google Gemini API (Modelos da lista MODELOS_PREFERENCIA)
-    2. Groq Cloud (Llama 3.1 8B Instant)
-    3. OpenRouter (Llama 3.3 70B / DeepSeek Free)
-    4. GitHub Models / Azure AI (GPT-4o-mini Free)
+    Esteira de Resiliência Multi-Provedor com isolamento por Circuit Breaker:
+    1. Google Gemini API (Se não estiver bloqueado)
+    2. Groq Cloud (Se não estiver bloqueado)
+    3. OpenRouter Free (Se não estiver bloqueado)
+    4. GitHub Models / Azure AI (Última retaguarda)
     """
     sys_instruction = str(config.system_instruction) if hasattr(config, 'system_instruction') and config.system_instruction else ""
     temp = getattr(config, 'temperature', 0.2)
 
-    # Mock para manter compatibilidade com a interface de atributos do Gemini no app.py
     class RespostaMock:
         def __init__(self, text):
             self.text = text
@@ -606,60 +628,66 @@ def chamar_llm_multi_provedor(client_gemini, contents, config, prompt_usuario):
     # =========================================================================
     # CAMADA 1: GOOGLE GEMINI API
     # =========================================================================
-    for modelo in MODELOS_PREFERENCIA:
-        try:
-            response = client_gemini.models.generate_content(
-                model=modelo,
-                contents=contents,
-                config=config,
-            )
-            return response, f"gemini/{modelo}"
-        except Exception as e:
-            print(f"⚠️ [Camada 1] Gemini '{modelo}' falhou: {e}. Testando próximo...", file=sys.stderr)
-            continue
-
-    print("🚨 All Gemini models failed. Activating Multi-Provider Fallback Chain...", file=sys.stderr)
+    if not esta_bloqueado("gemini"):
+        for modelo in MODELOS_PREFERENCIA:
+            try:
+                response = client_gemini.models.generate_content(
+                    model=modelo,
+                    contents=contents,
+                    config=config,
+                )
+                return response, f"gemini/{modelo}"
+            except Exception as e:
+                print(f"⚠️ [Gemini] Modelo '{modelo}' falhou: {e}", file=sys.stderr)
+                continue
+        
+        # Se todos os modelos do Gemini falharam nesta rodada, bloqueia o Gemini por 3 minutos
+        marcar_falha("gemini", minutos=3)
 
     # =========================================================================
     # CAMADA 2: GROQ CLOUD (Llama 3.1 8B Instant)
     # =========================================================================
-    api_key_groq = os.environ.get("GROQ_API_KEY") or st.secrets.get("GROQ_API_KEY", None)
-    if api_key_groq:
-        try:
-            client_groq = Groq(api_key=api_key_groq)
-            chat_completion = client_groq.chat.completions.create(
-                messages=[
-                    {"role": "system", "content": sys_instruction},
-                    {"role": "user", "content": prompt_usuario}
-                ],
-                model="llama-3.1-8b-instant",
-                temperature=temp,
-            )
-            return RespostaMock(chat_completion.choices[0].message.content), "groq/llama-3.1-8b-instant"
-        except Exception as err_groq:
-            print(f"⚠️ [Camada 2] Groq falhou: {err_groq}. Acionando OpenRouter...", file=sys.stderr)
+    if not esta_bloqueado("groq"):
+        api_key_groq = os.environ.get("GROQ_API_KEY") or st.secrets.get("GROQ_API_KEY", None)
+        if api_key_groq:
+            try:
+                client_groq = Groq(api_key=api_key_groq)
+                chat_completion = client_groq.chat.completions.create(
+                    messages=[
+                        {"role": "system", "content": sys_instruction},
+                        {"role": "user", "content": prompt_usuario}
+                    ],
+                    model="llama-3.1-8b-instant",
+                    temperature=temp,
+                )
+                return RespostaMock(chat_completion.choices[0].message.content), "groq/llama-3.1-8b-instant"
+            except Exception as err_groq:
+                print(f"⚠️ [Groq] Falhou: {err_groq}", file=sys.stderr)
+                marcar_falha("groq", minutos=5)
 
     # =========================================================================
     # CAMADA 3: OPENROUTER (Modelos Gratuitos Roteados)
     # =========================================================================
-    api_key_openrouter = os.environ.get("OPENROUTER_API_KEY") or st.secrets.get("OPENROUTER_API_KEY", None)
-    if api_key_openrouter:
-        try:
-            client_or = OpenAI(
-                base_url="https://openrouter.ai/api/v1",
-                api_key=api_key_openrouter,
-            )
-            completion = client_or.chat.completions.create(
-                model="meta-llama/llama-3.3-70b-instruct:free",
-                messages=[
-                    {"role": "system", "content": sys_instruction},
-                    {"role": "user", "content": prompt_usuario}
-                ],
-                temperature=temp,
-            )
-            return RespostaMock(completion.choices[0].message.content), "openrouter/llama-3.3-70b:free"
-        except Exception as err_or:
-            print(f"⚠️ [Camada 3] OpenRouter falhou: {err_or}. Acionando GitHub Models...", file=sys.stderr)
+    if not esta_bloqueado("openrouter"):
+        api_key_openrouter = os.environ.get("OPENROUTER_API_KEY") or st.secrets.get("OPENROUTER_API_KEY", None)
+        if api_key_openrouter:
+            try:
+                client_or = OpenAI(
+                    base_url="https://openrouter.ai/api/v1",
+                    api_key=api_key_openrouter,
+                )
+                completion = client_or.chat.completions.create(
+                    model="meta-llama/llama-3.3-70b-instruct:free",
+                    messages=[
+                        {"role": "system", "content": sys_instruction},
+                        {"role": "user", "content": prompt_usuario}
+                    ],
+                    temperature=temp,
+                )
+                return RespostaMock(completion.choices[0].message.content), "openrouter/llama-3.3-70b:free"
+            except Exception as err_or:
+                print(f"⚠️ [OpenRouter] Falhou: {err_or}", file=sys.stderr)
+                marcar_falha("openrouter", minutos=5)
 
     # =========================================================================
     # CAMADA 4: GITHUB MODELS / AZURE AI (GPT-4o-mini Free)
@@ -681,9 +709,9 @@ def chamar_llm_multi_provedor(client_gemini, contents, config, prompt_usuario):
             )
             return RespostaMock(completion.choices[0].message.content), "github/gpt-4o-mini"
         except Exception as err_gh:
-            print(f"❌ [Camada 4] GitHub Models falhou: {err_gh}", file=sys.stderr)
+            print(f"❌ [GitHub Models] Falhou: {err_gh}", file=sys.stderr)
 
-    raise Exception("Todos os 4 provedores de LLM gratuitos estão indisponíveis no momento.")
+    raise Exception("Todos os provedores de LLM estão temporariamente bloqueados ou indisponíveis.")
 # =============================================================================
 # PROCESSAMENTO PRINCIPAL (MCP + GEMINI)
 # =============================================================================
