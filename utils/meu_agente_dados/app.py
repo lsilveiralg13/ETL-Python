@@ -38,7 +38,7 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-CAMINHO_SERVIDOR = os.path.join(RAIZ_PROJETO, "servidor_mcp.py")
+CAMINHO_SERVIDOR = os.path.join(DIR_ATUAL, "servidor_mcp.py")
 
 # Lista de modelos válidos e recomendados pela API
 MODELOS_PREFERENCIA = [
