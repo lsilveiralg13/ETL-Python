@@ -620,7 +620,7 @@ def chamar_llm_multi_provedor(client_gemini, contents, config, prompt_usuario):
                 {"role": "system", "content": sys_instruction},
                 {"role": "user", "content": prompt_usuario}
             ],
-            model="llama-3.3-70b-versatile",
+            model="llama3-70b-8192",
             temperature=getattr(config, 'temperature', 0.2),
         )
         
@@ -771,7 +771,7 @@ async def processar_mcp_e_llm(prompt_usuario, historico_mensagens, dialeto_sql, 
                         )
                     )
 
-                    response, modelo_usado = chamar_gemini_com_fallback(client, contents, config)
+                    response, modelo_usado = chamar_llm_multi_provedor(client, contents, config, prompt_usuario)
 
                 texto_final = extrair_texto_da_resposta(response)
                 
