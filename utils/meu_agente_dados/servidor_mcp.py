@@ -3,7 +3,7 @@ import sys
 
 # Garante que a raiz do projeto (onde está a pasta 'core') seja encontrada pelo Python
 DIR_ATUAL = os.path.dirname(os.path.abspath(__file__))
-RAIZ_PROJETO = os.path.abspath(DIR_ATUAL)
+RAIZ_PROJETO = os.path.abspath(os.path.join(DIR_ATUAL, "../../"))
 if RAIZ_PROJETO not in sys.path:
     sys.path.insert(0, RAIZ_PROJETO)
 
