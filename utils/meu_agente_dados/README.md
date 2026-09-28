@@ -20,6 +20,9 @@ graph TD
     B -->|Orquestração de Fallback 503/429| G[Google Gemini API]
     G -->|gemini-3-flash / gemini-2.5-flash| B
     B -->|Exportação de Relatórios| H[Excel / CSV / Markdown]
+```
+
+---
 
 📝 Changelog
 [v1.2.0] — 2026-09-28
