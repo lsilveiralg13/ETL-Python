@@ -584,24 +584,22 @@ def extrair_texto_da_resposta(response):
     return "\n".join(resultado_limpo).strip()
 
 # -----------------------------------------------------------------------------
-# CIRCUIT BREAKER MEMOIZATION (GERENCIAMENTO DINÂMICO DE FALHAS)
+# CIRCUIT BREAKER MEMOIZATION (DICIONÁRIO GLOBAL SEGURO)
 # -----------------------------------------------------------------------------
-if "provedores_bloqueados" not in st.session_state:
-    st.session_state.provedores_bloqueados = {}
+PROVEDORES_BLOQUEADOS = {}
 
 def esta_bloqueado(provedor: str) -> bool:
     """Verifica se o provedor está temporariamente marcado como OFFLINE."""
     agora = time.time()
-    bloqueados = st.session_state.provedores_bloqueados
-    if provedor in bloqueados:
-        if agora < bloqueados[provedor]:
+    if provedor in PROVEDORES_BLOQUEADOS:
+        if agora < PROVEDORES_BLOQUEADOS[provedor]:
             return True
-        del bloqueados[provedor]  # Bloqueio expirou, permite nova tentativa
+        del PROVEDORES_BLOQUEADOS[provedor]  # Bloqueio expirou, permite nova tentativa
     return False
 
 def marcar_falha(provedor: str, minutos: int = 3):
     """Marca o provedor como OFFLINE por X minutos após um erro 503/Indisponibilidade."""
-    st.session_state.provedores_bloqueados[provedor] = time.time() + (minutos * 60)
+    PROVEDORES_BLOQUEADOS[provedor] = time.time() + (minutos * 60)
     print(f"🚫 Circuit Breaker: Provedor '{provedor}' marcado como OFFLINE por {minutos} min.", file=sys.stderr)
 
 
