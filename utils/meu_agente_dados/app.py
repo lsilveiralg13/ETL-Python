@@ -46,11 +46,10 @@ CAMINHO_SERVIDOR = os.path.join(DIR_ATUAL, "servidor_mcp.py")
 
 # Lista de modelos válidos e recomendados pela API
 MODELOS_PREFERENCIA = [
-    "gemini-2.5-flash",        # Mais estável em produção e com cota alta
-    "gemini-2.5-pro",          # Alta capacidade de raciocínio
-    "gemini-1.5-flash",        # Excelente fallback rápido
-    "gemini-3-flash-preview",  # Preview mantido como última opção da família Gemini
-    "llama-3.3-70b-versatile"  # API llama 3.3 70B (Groq Cloud) como fallback final
+    "gemini-3.8-flash",         # Modelo principal recomendado pela Google
+    "gemini-3.1-pro-preview",   # Modelo Pro recomendado
+    "gemini-3-flash-preview",   # Modelo Preview ativo
+    "llama-3.3-70b-versatile"   # API llama 3.3 70B (Groq Cloud) como fallback final
 ]
 
 # Catálogo completo das ferramentas expostas pelo servidor MCP (incluindo RAG e SQL AST)
