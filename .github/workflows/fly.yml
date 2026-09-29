@@ -1,0 +1,22 @@
+name: Deploy Vetra na Fly.io
+
+on:
+  push:
+    branches:
+      - main  # ou 'master', dependendo do nome da sua branch principal
+
+jobs:
+  deploy:
+    name: Deploy da Aplicação
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout do Código
+        uses: actions/checkout@v4
+
+      - name: Setup Flyctl
+        uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Executar Deploy
+        run: flyctl deploy --remote-only
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
