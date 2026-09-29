@@ -955,13 +955,107 @@ if prompt:
             if modelo_usado:
                 st.caption(f"Respondido por `{modelo_usado}` · {datetime.now().strftime('%H:%M')}")
 
-            # RENDERIZAÇÃO DE TABELAS COM SANITY CHECK & PII MASKING
-            if retorno_mcp and "```json" in retorno_mcp:
-                try:
+           # RENDERIZAÇÃO VISUAL: TABELAS E MOTORES DE MACHINE LEARNING
+            if retorno_mcp:
+                # Extrai o conteúdo JSON caso esteja envolvido por markdown ```json ... ```
+                json_str = retorno_mcp
+                if "```json" in retorno_mcp:
                     json_str = retorno_mcp.split("```json")[1].split("```")[0].strip()
+                elif "```" in retorno_mcp:
+                    json_str = retorno_mcp.split("```")[1].split("```")[0].strip()
+
+                try:
                     dados = json.loads(json_str)
-                    
-                    if isinstance(dados, dict) and "linhas" in dados and "colunas" in dados:
+
+                    # =========================================================================
+                    # RENDERIZADOR DEDICADO A MACHINE LEARNING (PREVISÕES, ANOMALIAS, CLUSTERS)
+                    # =========================================================================
+                    if isinstance(dados, dict) and dados.get("status") == "sucesso":
+                        st.markdown("---")
+                        st.markdown("#### 🤖 Painel de Inteligência de Machine Learning")
+
+                        # 1. RENDERIZADOR DE FORECASTING (SÉRIES TEMPORAIS)
+                        if "previsoes" in dados and "historico_recente" in dados:
+                            df_hist = pd.DataFrame(dados["historico_recente"])
+                            df_pred = pd.DataFrame(dados["previsoes"])
+
+                            # Renomeia colunas para unificar
+                            if "valor_historico" in df_hist.columns:
+                                df_hist = df_hist.rename(columns={"valor_historico": "Valor"})
+                                df_hist["Tipo"] = "Histórico"
+                            
+                            if "valor_previsto" in df_pred.columns:
+                                df_pred = df_pred.rename(columns={"valor_previsto": "Valor"})
+                                df_pred["Tipo"] = "Projeção ML"
+
+                            df_combinado = pd.concat([df_hist, df_pred], ignore_index=True)
+
+                            col_m1, col_m2 = st.columns(2)
+                            col_m1.metric("Modelo Preditivo", dados.get("modelo_utilizado", "Holt-Winters"))
+                            col_m2.metric("Horizontes Projetados", f"{dados.get('periodos_projetados', len(df_pred))} períodos")
+
+                            fig_forecast = px.line(
+                                df_combinado,
+                                x="data",
+                                y="Valor",
+                                color="Tipo",
+                                title="📈 Projeção Tendencial e Séries Temporais (Forecasting ML)",
+                                markers=True,
+                                color_discrete_map={"Histórico": "#45C4B0", "Projeção ML": "#E8A945"}
+                            )
+                            fig_forecast.update_traces(patch={"line": {"dash": "dot"}}, selector={"name": "Projeção ML"})
+                            st.plotly_chart(fig_forecast, use_container_width=True)
+
+                        # 2. RENDERIZADOR DE DETECÇÃO DE ANOMALIAS
+                        elif "total_anomalias_encontradas" in dados:
+                            c_kpi1, c_kpi2, c_kpi3 = st.columns(3)
+                            c_kpi1.metric("Linhas Analisadas", dados.get("total_linhas_analisadas", 0))
+                            c_kpi2.metric("Anomalias Detectadas", dados.get("total_anomalias_encontradas", 0), delta_color="inverse")
+                            c_kpi3.metric("Taxa de Contaminação", f"{dados.get('percentual_anomalias', 0)}%")
+
+                            if "amostra_anomalias_detectadas" in dados and dados["amostra_anomalias_detectadas"]:
+                                st.markdown("##### 🚨 Registros Anômalos Isolados (Isolation Forest)")
+                                df_anom = pd.DataFrame(dados["amostra_anomalias_detectadas"])
+                                st.dataframe(df_anom, use_container_width=True)
+
+                        # 3. RENDERIZADOR DE CLUSTERING (K-MEANS)
+                        elif "resumo_perfis_clusters" in dados:
+                            st.markdown(f"##### 🎯 Agrupamento em {dados.get('total_clusters', 0)} Perfis Ocultos (K-Means)")
+                            df_clusters = pd.DataFrame(dados["resumo_perfis_clusters"])
+                            
+                            c_cl1, c_cl2 = st.columns([1, 1])
+                            with c_cl1:
+                                st.dataframe(df_clusters, use_container_width=True)
+                            with c_cl2:
+                                fig_cluster = px.bar(
+                                    df_clusters,
+                                    x="cluster_id",
+                                    y="quantidade_elementos",
+                                    title="Distribuição de Elementos por Cluster",
+                                    color="cluster_id"
+                                )
+                                st.plotly_chart(fig_cluster, use_container_width=True)
+
+                        # 4. RENDERIZADOR DE EXPLAINABILITY / IMPORTÂNCIA DE VARIÁVEIS
+                        elif "ranking_importancia_variaveis" in dados:
+                            st.markdown(f"##### 💡 Fatores de Impacto na Métrica Alvo: `{dados.get('variavel_alvo', '')}`")
+                            df_imp = pd.DataFrame(dados["ranking_importancia_variaveis"])
+                            
+                            fig_imp = px.bar(
+                                df_imp,
+                                x="importancia_percentual",
+                                y="variavel",
+                                orientation="h",
+                                title="Feature Importance (%) via Random Forest",
+                                color="importancia_percentual",
+                                color_continuous_scale="Viridis"
+                            )
+                            st.plotly_chart(fig_imp, use_container_width=True)
+
+                    # =========================================================================
+                    # RENDERIZADOR PADRÃO PARA TABELAS E CONSULTAS SQL CONVENCIONAIS
+                    # =========================================================================
+                    elif isinstance(dados, dict) and "linhas" in dados and "colunas" in dados:
                         df_bruto = pd.DataFrame(dados["linhas"], columns=dados["colunas"])
                         
                         # PROTOCOLO DE SANITY CHECK (QUALIDADE)
@@ -970,6 +1064,66 @@ if prompt:
                             with st.expander("🛡️ Relatório de Qualidade de Dados (Sanity Check)", expanded=True):
                                 for al in alertas_qualidade:
                                     st.warning(al)
+
+                        # MASCARAMENTO DE PII (LGPD)
+                        if st.session_state.preferencias_usuario.get("mascarar_pii", True):
+                            df_exibicao, cols_mascaradas = aplicar_mascaramento_pii(df_bruto)
+                            if cols_mascaradas:
+                                st.caption(f"🔒 **LGPD / PII Masking Ativo**: Colunas mascaradas: {', '.join(cols_mascaradas)}")
+                        else:
+                            df_exibicao = df_bruto
+
+                        st.markdown("---")
+                        st.markdown("#### 📊 Painel de Análise e Visualização de Dados")
+                        
+                        col_df, col_chart = st.columns([1, 1])
+                        with col_df:
+                            st.dataframe(df_exibicao, use_container_width=True)
+                            
+                            st.markdown("##### 📥 Exportar Resultados")
+                            c_exp1, c_exp2 = st.columns(2)
+                            
+                            buffer_excel = io.BytesIO()
+                            with pd.ExcelWriter(buffer_excel, engine='openpyxl') as writer:
+                                df_exibicao.to_excel(writer, index=False, sheet_name='Resultado_Vetra')
+                            
+                            c_exp1.download_button(
+                                label="📊 Baixar Excel (.xlsx)",
+                                data=buffer_excel.getvalue(),
+                                file_name=f"vetra_resultado_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                use_container_width=True
+                            )
+                            
+                            csv_data = df_exibicao.to_csv(index=False).encode('utf-8')
+                            c_exp2.download_button(
+                                label="📄 Baixar CSV (.csv)",
+                                data=csv_data,
+                                file_name=f"vetra_resultado_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                                mime="text/csv",
+                                use_container_width=True
+                            )
+
+                        with col_chart:
+                            if not df_exibicao.empty and len(df_exibicao.columns) >= 2:
+                                idx_msg = len(st.session_state.messages)
+                                tipo_grafico = st.selectbox("Tipo de Gráfico", ["Barras", "Linhas", "Área", "Dispersão"], key=f"chart_type_{idx_msg}")
+                                col_x = st.selectbox("Eixo X", df_exibicao.columns, index=0, key=f"chart_x_{idx_msg}")
+                                col_y = st.selectbox("Eixo Y", df_exibicao.columns, index=min(1, len(df_exibicao.columns)-1), key=f"chart_y_{idx_msg}")
+                                
+                                if tipo_grafico == "Barras":
+                                    fig = px.bar(df_exibicao, x=col_x, y=col_y, title=f"{col_y} por {col_x}")
+                                elif tipo_grafico == "Linhas":
+                                    fig = px.line(df_exibicao, x=col_x, y=col_y, title=f"{col_y} por {col_x}", markers=True)
+                                elif tipo_grafico == "Área":
+                                    fig = px.area(df_exibicao, x=col_x, y=col_y, title=f"{col_y} por {col_x}")
+                                elif tipo_grafico == "Dispersão":
+                                    fig = px.scatter(df_exibicao, x=col_x, y=col_y, title=f"{col_y} por {col_x}")
+                                
+                                st.plotly_chart(fig, use_container_width=True)
+
+                except Exception as e:
+                    st.warning(f"Não foi possível renderizar a visualização tabular/gráfica: {e}")
 
                         # MASCARAMENTO DE PII (LGPD)
                         if st.session_state.preferencias_usuario.get("mascarar_pii", True):
