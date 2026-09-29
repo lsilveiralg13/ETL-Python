@@ -19,5 +19,9 @@ COPY . .
 # Expor a porta do Streamlit
 EXPOSE 8501
 
+# Variável de Ambiente
+
+ENV PYTHONPATH=/app
+
 # Comando para iniciar a aplicação
 CMD ["streamlit", "run", "utils/meu_agente_dados/app.py", "--server.port=8501", "--server.address=0.0.0.0"]
