@@ -963,7 +963,7 @@ if len(st.session_state.messages) == 1:
 # =============================================================================
 # HISTÓRICO DE CHAT
 # =============================================================================
-AVATAR_USUARIO = "🧑‍‍💻"
+AVATAR_USUARIO = "👤"
 AVATAR_MODELO = "🤖"
 
 for message in st.session_state.messages:
