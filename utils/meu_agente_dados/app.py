@@ -44,6 +44,11 @@ st.set_page_config(
 
 CAMINHO_SERVIDOR = os.path.join(DIR_ATUAL, "servidor_mcp.py")
 
+# Tabela de Preços Estimados (Gemini Flash Pay-as-you-go) por 1 Milhão de Tokens (USD)
+PRECO_INPUT_1M = 0.075   # $0,075 por 1M tokens de entrada
+PRECO_OUTPUT_1M = 0.30   # $0,30 por 1M tokens de saída
+TAXA_CAMBIO_USD_BRL = 5.60 # Cotação média BRL/USD para estimativa
+
 # Lista de modelos válidos e recomendados estritamente da Google Gemini API
 MODELOS_PREFERENCIA = [
     "gemini-3.8-flash",         # Modelo principal recomendado pela Google
@@ -111,6 +116,16 @@ if "total_chamadas_mcp" not in st.session_state:
 if "rag_feedbacks" not in st.session_state:
     st.session_state.rag_feedbacks = []
 
+# METRICAS DE CONSUMO DE TOKENS E CUSTOS
+if "total_tokens_input" not in st.session_state:
+    st.session_state.total_tokens_input = 0
+
+if "total_tokens_output" not in st.session_state:
+    st.session_state.total_tokens_output = 0
+
+if "custo_acumulado_usd" not in st.session_state:
+    st.session_state.custo_acumulado_usd = 0.0
+
 # =============================================================================
 # FUNÇÕES DE GOVERNANÇA, PII, QUALIDADE E PERFORMANCE
 # =============================================================================
@@ -173,6 +188,24 @@ def analisar_explain_plan_sql(sql_query: str) -> list[str]:
         alertas_perf.append("⚡ **Varredura Ampla (`SELECT *`)**: Pode aumentar o I/O de rede e latência.")
         
     return alertas_perf
+
+
+def registrar_uso_tokens(response):
+    """Extrai e acumula métricas de uso de tokens do objeto de resposta da LLM."""
+    try:
+        usage = getattr(response, "usage_metadata", None)
+        if usage:
+            inp = getattr(usage, "prompt_token_count", 0) or 0
+            out = getattr(usage, "candidates_token_count", 0) or 0
+            
+            st.session_state.total_tokens_input += inp
+            st.session_state.total_tokens_output += out
+            
+            custo_inp = (inp / 1_000_000) * PRECO_INPUT_1M
+            custo_out = (out / 1_000_000) * PRECO_OUTPUT_1M
+            st.session_state.custo_acumulado_usd += (custo_inp + custo_out)
+    except Exception as e:
+        print(f"Erro ao registrar telemetria de tokens: {e}", file=sys.stderr)
 
 # =============================================================================
 # ESTILO — PALETA, TIPOGRAFIA E HARMONIZAÇÃO DO TEMA ESCURO
@@ -453,6 +486,34 @@ with st.sidebar:
 
     st.markdown('<div class="vt-sep"></div>', unsafe_allow_html=True)
 
+    # MONITOR DE TOKENS E ESTIMATIVA DE CUSTOS
+    st.markdown('<div class="vt-card-title">Telemetria & Custos (Sessão)</div>', unsafe_allow_html=True)
+    tokens_in = st.session_state.total_tokens_input
+    tokens_out = st.session_state.total_tokens_output
+    tokens_totais = tokens_in + tokens_out
+    custo_usd = st.session_state.custo_acumulado_usd
+    custo_brl = custo_usd * TAXA_CAMBIO_USD_BRL
+
+    st.markdown(
+        f"""
+        <div class="vt-card">
+            <div class="vt-tool-row"><span class="vt-tool-desc">Tokens de Entrada (Prompt)</span></div>
+            <div style="font-family:'Space Grotesk',sans-serif;font-size:1.0rem;margin:2px 0 6px 0;color:var(--text-primary);">{tokens_in:,}</div>
+            <div class="vt-tool-row"><span class="vt-tool-desc">Tokens de Saída (Resposta)</span></div>
+            <div style="font-family:'Space Grotesk',sans-serif;font-size:1.0rem;margin:2px 0 6px 0;color:var(--text-primary);">{tokens_out:,}</div>
+            <div class="vt-tool-row"><span class="vt-tool-desc">Volume Total de Tokens</span></div>
+            <div style="font-family:'Space Grotesk',sans-serif;font-size:1.15rem;font-weight:600;margin:2px 0 10px 0;color:var(--accent);">{tokens_totais:,}</div>
+            <div class="vt-tool-row"><span class="vt-tool-desc">Custo Estimado (USD / BRL)</span></div>
+            <div style="font-family:'Space Grotesk',sans-serif;font-size:1.2rem;font-weight:700;color:var(--amber);margin-top:2px;">
+                ${custo_usd:.4f} <span style="font-size:0.8rem;color:var(--text-muted);">(R$ {custo_brl:.2f})</span>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown('<div class="vt-sep"></div>', unsafe_allow_html=True)
+
     st.markdown('<div class="vt-card-title">Modelos (ordem de fallback)</div>', unsafe_allow_html=True)
     linhas_modelos = "".join(
         f'<div class="vt-tool-row"><span class="vt-tool-name">{m}</span></div>'
@@ -490,7 +551,7 @@ with st.sidebar:
         st.markdown('<div class="vt-card-title">Exportar Sessão</div>', unsafe_allow_html=True)
         linhas_md = ["# Relatório Consultivo — Vetra Data Agent\n\n"]
         for msg in st.session_state.messages:
-            papel = "🧑‍💻 **Usuário**" if msg["role"] == "user" else "🤖 **Vetra**"
+            papel = "🧑‍‍💻 **Usuário**" if msg["role"] == "user" else "🤖 **Vetra**"
             linhas_md.append(f"### {papel}\n{msg['content']}\n\n---\n")
         
         conteudo_md = "".join(linhas_md)
@@ -502,7 +563,7 @@ with st.sidebar:
             use_container_width=True
         )
 
-    if st.button("🗑️  Limpar conversa", use_container_width=True):
+    if st.button("🗑️  Limpar conversa e telemetria", use_container_width=True):
         st.session_state.messages = [
             {
                 "role": "model",
@@ -512,6 +573,9 @@ with st.sidebar:
         st.session_state.ultimo_modelo = None
         st.session_state.total_chamadas_mcp = 0
         st.session_state.rag_feedbacks = []
+        st.session_state.total_tokens_input = 0
+        st.session_state.total_tokens_output = 0
+        st.session_state.custo_acumulado_usd = 0.0
         st.rerun()
 
     st.markdown('<div class="vt-sep"></div>', unsafe_allow_html=True)
@@ -620,6 +684,7 @@ def chamar_llm_multi_provedor(client_gemini, contents, config, prompt_usuario):
             self.text = text
             self.function_calls = None
             self.candidates = []
+            self.usage_metadata = None
 
     # =========================================================================
     # CAMADA 1: GOOGLE GEMINI API
@@ -632,6 +697,7 @@ def chamar_llm_multi_provedor(client_gemini, contents, config, prompt_usuario):
                     contents=contents,
                     config=config,
                 )
+                registrar_uso_tokens(response)
                 return response, f"gemini/{modelo}"
             except Exception as e:
                 print(f"⚠️ [Gemini] Modelo '{modelo}' falhou: {e}", file=sys.stderr)
@@ -650,7 +716,6 @@ def chamar_llm_multi_provedor(client_gemini, contents, config, prompt_usuario):
             try:
                 client_groq = Groq(api_key=api_key_groq)
                 
-                # Tenta primeiro o modelo Llama 3.3 70B e faz fallback interno para o 8B em caso de limitação de cota
                 modelos_groq = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]
                 for m_groq in modelos_groq:
                     try:
@@ -898,7 +963,7 @@ if len(st.session_state.messages) == 1:
 # =============================================================================
 # HISTÓRICO DE CHAT
 # =============================================================================
-AVATAR_USUARIO = "🧑‍💻"
+AVATAR_USUARIO = "🧑‍‍💻"
 AVATAR_MODELO = "🤖"
 
 for message in st.session_state.messages:
