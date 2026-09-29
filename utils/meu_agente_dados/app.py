@@ -955,7 +955,7 @@ if prompt:
             if modelo_usado:
                 st.caption(f"Respondido por `{modelo_usado}` · {datetime.now().strftime('%H:%M')}")
 
-           # RENDERIZAÇÃO VISUAL: TABELAS E MOTORES DE MACHINE LEARNING
+            # RENDERIZAÇÃO VISUAL: TABELAS E MOTORES DE MACHINE LEARNING
             if retorno_mcp:
                 # Extrai o conteúdo JSON caso esteja envolvido por markdown ```json ... ```
                 json_str = retorno_mcp
@@ -1125,65 +1125,6 @@ if prompt:
                 except Exception as e:
                     st.warning(f"Não foi possível renderizar a visualização tabular/gráfica: {e}")
 
-            # MASCARAMENTO DE PII (LGPD)
-                        if st.session_state.preferencias_usuario.get("mascarar_pii", True):
-                            df_exibicao, cols_mascaradas = aplicar_mascaramento_pii(df_bruto)
-                            if cols_mascaradas:
-                                st.caption(f"🔒 **LGPD / PII Masking Ativo**: Colunas mascaradas: {', '.join(cols_mascaradas)}")
-                        else:
-                            df_exibicao = df_bruto
-
-                        st.markdown("---")
-                        st.markdown("#### 📊 Painel de Análise e Visualização de Dados")
-                        
-                        col_df, col_chart = st.columns([1, 1])
-                        with col_df:
-                            st.dataframe(df_exibicao, use_container_width=True)
-                            
-                            st.markdown("##### 📥 Exportar Resultados")
-                            c_exp1, c_exp2 = st.columns(2)
-                            
-                            buffer_excel = io.BytesIO()
-                            with pd.ExcelWriter(buffer_excel, engine='openpyxl') as writer:
-                                df_exibicao.to_excel(writer, index=False, sheet_name='Resultado_Vetra')
-                            
-                            c_exp1.download_button(
-                                label="📊 Baixar Excel (.xlsx)",
-                                data=buffer_excel.getvalue(),
-                                file_name=f"vetra_resultado_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
-                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                use_container_width=True
-                            )
-                            
-                            csv_data = df_exibicao.to_csv(index=False).encode('utf-8')
-                            c_exp2.download_button(
-                                label="📄 Baixar CSV (.csv)",
-                                data=csv_data,
-                                file_name=f"vetra_resultado_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                                mime="text/csv",
-                                use_container_width=True
-                            )
-
-                        with col_chart:
-                            if not df_exibicao.empty and len(df_exibicao.columns) >= 2:
-                                idx_msg = len(st.session_state.messages)
-                                tipo_grafico = st.selectbox("Tipo de Gráfico", ["Barras", "Linhas", "Área", "Dispersão"], key=f"chart_type_{idx_msg}")
-                                col_x = st.selectbox("Eixo X", df_exibicao.columns, index=0, key=f"chart_x_{idx_msg}")
-                                col_y = st.selectbox("Eixo Y", df_exibicao.columns, index=min(1, len(df_exibicao.columns)-1), key=f"chart_y_{idx_msg}")
-                                
-                                if tipo_grafico == "Barras":
-                                    fig = px.bar(df_exibicao, x=col_x, y=col_y, title=f"{col_y} por {col_x}")
-                                elif tipo_grafico == "Linhas":
-                                    fig = px.line(df_exibicao, x=col_x, y=col_y, title=f"{col_y} por {col_x}", markers=True)
-                                elif tipo_grafico == "Área":
-                                    fig = px.area(df_exibicao, x=col_x, y=col_y, title=f"{col_y} por {col_x}")
-                                elif tipo_grafico == "Dispersão":
-                                    fig = px.scatter(df_exibicao, x=col_x, y=col_y, title=f"{col_y} por {col_x}")
-                                
-                                st.plotly_chart(fig, use_container_width=True)
-
-                except Exception as e:
-                    st.warning(f"Não foi possível renderizar a visualização tabular/gráfica: {e}")
             # LOOP DE FEEDBACK DO RAG & AVALIAÇÃO TRIAD
             if mcp_chamado and retorno_mcp and "buscar_conhecimento_rag" in str(retorno_mcp):
                 st.markdown("---")
