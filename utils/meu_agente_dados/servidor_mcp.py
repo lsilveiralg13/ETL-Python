@@ -15,13 +15,22 @@ from functools import wraps
 from mcp.server.mcpserver import MCPServer
 from qdrant_client import QdrantClient
 
-# Importação dos módulos de segurança RAG
+# Importações dos módulos de segurança RAG
 from core.rag_guard import buscar_conhecimento_rag as rag_guard_buscar, PROMPT_SISTEMA_VETRA
 from core.api_client import requisicao_api_segura
 
 import sqlglot
 import requests
 import pandas as pd
+import numpy as np
+
+# Importações para os Motores de Machine Learning e Estatística
+from sklearn.ensemble import IsolationForest, RandomForestRegressor
+from sklearn.preprocessing import StandardScaler
+from sklearn.cluster import KMeans
+from sklearn.impute import SimpleImputer
+from statsmodels.tsa.api import ExponentialSmoothing, SimpleExpSmoothing
+from scipy import stats
 
 mcp = MCPServer("AgenteConsultivoDados")
 
@@ -146,7 +155,7 @@ def indexar_documento_com_chunking(
     """Divide um texto longo em chunks e indexa no Qdrant Cloud com metadados ricos e PII sanitizado."""
     client = obter_cliente_qdrant()
     if not client:
-        return "⚠️ Qdrant Cloud não configurado ou indisponível."
+        return "⚠️️ Qdrant Cloud não configurado ou indisponível."
 
     try:
         texto_sanitizado = mascarar_dados_sensiveis(texto)
@@ -590,6 +599,290 @@ def consultar_futebol_liga(codigo_liga: str = "BSA") -> str:
         return f"```json\n{json.dumps(retorno, ensure_ascii=False, indent=2)}\n```"
     except Exception as e:
         return f"Erro ao consultar API de futebol: {str(e)}"
+
+# -----------------------------------------------------------------------------
+# MOTORES DE MACHINE LEARNING E ESTATÍSTICA AVANÇADA (TASK-BASED ML)
+# -----------------------------------------------------------------------------
+
+@mcp.tool()
+def gerar_previsao_generica(dados_json: str, coluna_data: str, coluna_alvo: str, periodos_frente: int = 30) -> str:
+    """
+    [ML MOTOR 1 - FORECASTING]
+    Projeta uma variável numérica ao longo do tempo (vendas, chamados, produção, estoques)
+    utilizando Suavização Exponencial (Holt-Winters). Recebe dados estruturados em JSON.
+    """
+    try:
+        dados = json.loads(dados_json)
+        if isinstance(dados, dict) and "linhas" in dados and "colunas" in dados:
+            df = pd.DataFrame(dados["linhas"], columns=dados["colunas"])
+        elif isinstance(dados, list):
+            df = pd.DataFrame(dados)
+        else:
+            df = pd.DataFrame(dados)
+
+        if df.empty or coluna_data not in df.columns or coluna_alvo not in df.columns:
+            return f"Erro: Os dados devem conter as colunas '{coluna_data}' e '{coluna_alvo}'."
+
+        df[coluna_data] = pd.to_datetime(df[coluna_data])
+        df[coluna_alvo] = pd.to_numeric(df[coluna_alvo], errors='coerce')
+        df = df.dropna(subset=[coluna_data, coluna_alvo]).sort_values(by=coluna_data)
+
+        if len(df) < 5:
+            return "Erro: O histórico é muito curto para gerar um modelo preditivo (mínimo de 5 pontos)."
+
+        df_ts = df.groupby(coluna_data)[coluna_alvo].sum().asfreq('D')
+        df_ts = df_ts.ffill().bfill()
+
+        try:
+            modelo = ExponentialSmoothing(df_ts, trend='add', seasonal=None).fit()
+        except Exception:
+            modelo = SimpleExpSmoothing(df_ts).fit()
+
+        previsao = modelo.forecast(periodos_frente)
+        datas_futuras = pd.date_range(start=df_ts.index[-1] + pd.Timedelta(days=1), periods=periodos_frente, freq='D')
+        
+        resultado_pred = []
+        for d, v in zip(datas_futuras, previsao):
+            resultado_pred.append({
+                "data": d.strftime('%Y-%m-%d'),
+                "valor_previsto": round(float(v), 2)
+            })
+
+        historico_recente = []
+        for d, v in zip(df_ts.index[-10:], df_ts.values[-10:]):
+            historico_recente.append({
+                "data": d.strftime('%Y-%m-%d'),
+                "valor_historico": round(float(v), 2)
+            })
+
+        return json.dumps({
+            "status": "sucesso",
+            "modelo_utilizado": modelo.__class__.__name__,
+            "periodos_projetados": periodos_frente,
+            "historico_recente": historico_recente,
+            "previsoes": resultado_pred
+        }, ensure_ascii=False)
+
+    except Exception as e:
+        return f"Erro ao gerar previsão de Machine Learning: {str(e)}"
+
+@mcp.tool()
+def detectar_anomalias_generico(dados_json: str, colunas_analise: List[str], sensibilidade: float = 0.05) -> str:
+    """
+    [ML MOTOR 2 - ANOMALY DETECTION]
+    Identifica padrões atípicos, desvios, fraudes e outliers em um dataset multidimensional
+    utilizando o algoritmo não supervisionado Isolation Forest.
+    """
+    try:
+        dados = json.loads(dados_json)
+        if isinstance(dados, dict) and "linhas" in dados and "colunas" in dados:
+            df = pd.DataFrame(dados["linhas"], columns=dados["colunas"])
+        elif isinstance(dados, list):
+            df = pd.DataFrame(dados)
+        else:
+            df = pd.DataFrame(dados)
+
+        if df.empty:
+            return "Erro: O conjunto de dados fornecido está vazio."
+
+        cols_validas = [c for c in colunas_analise if c in df.columns]
+        if not cols_validas:
+            return f"Erro: Nenhuma das colunas {colunas_analise} foi encontrada no dataset."
+
+        X = df[cols_validas].copy()
+        for col in cols_validas:
+            X[col] = pd.to_numeric(X[col], errors='coerce')
+        
+        imputer = SimpleImputer(strategy='median')
+        X_imputed = imputer.fit_transform(X)
+
+        scaler = StandardScaler()
+        X_scaled = scaler.fit_transform(X_imputed)
+
+        model = IsolationForest(contamination=max(0.01, min(0.2, sensibilidade)), random_state=42)
+        df['anomalia_score'] = model.fit_predict(X_scaled)
+        
+        anomalias = df[df['anomalia_score'] == -1].copy()
+        total_anomalias = len(anomalias)
+
+        amostra_anomalias = anomalias.head(15).drop(columns=['anomalia_score']).to_dict(orient='records')
+
+        return json.dumps({
+            "status": "sucesso",
+            "algoritmo": "Isolation Forest",
+            "total_linhas_analisadas": len(df),
+            "total_anomalias_encontradas": total_anomalias,
+            "percentual_anomalias": round((total_anomalias / len(df)) * 100, 2),
+            "colunas_avaliadas": cols_validas,
+            "amostra_anomalias_detectadas": amostra_anomalias
+        }, ensure_ascii=False)
+
+    except Exception as e:
+        return f"Erro na detecção de anomalias: {str(e)}"
+
+@mcp.tool()
+def agrupar_dados_generico(dados_json: str, colunas_caracteristicas: List[str], num_clusters: int = 0) -> str:
+    """
+    [ML MOTOR 3 - CLUSTERING & SEGMENTAÇÃO]
+    Descobre agrupamentos naturais, perfis de clientes ou categorias ocultas nos dados
+    utilizando o algoritmo K-Means.
+    """
+    try:
+        dados = json.loads(dados_json)
+        if isinstance(dados, dict) and "linhas" in dados and "colunas" in dados:
+            df = pd.DataFrame(dados["linhas"], columns=dados["colunas"])
+        elif isinstance(dados, list):
+            df = pd.DataFrame(dados)
+        else:
+            df = pd.DataFrame(dados)
+
+        if df.empty:
+            return "Erro: O conjunto de dados fornecido está vazio."
+
+        cols_validas = [c for c in colunas_caracteristicas if c in df.columns]
+        if not cols_validas:
+            return f"Erro: Nenhuma coluna válida encontrada entre {colunas_caracteristicas}."
+
+        X = df[cols_validas].copy()
+        for col in cols_validas:
+            X[col] = pd.to_numeric(X[col], errors='coerce')
+
+        imputer = SimpleImputer(strategy='mean')
+        X_imputed = imputer.fit_transform(X)
+
+        scaler = StandardScaler()
+        X_scaled = scaler.fit_transform(X_imputed)
+
+        k = num_clusters if num_clusters >= 2 else min(4, max(2, len(df) // 10))
+
+        kmeans = KMeans(n_clusters=k, random_state=42, n_init=10)
+        df['cluster'] = kmeans.fit_predict(X_scaled)
+
+        resumo_clusters = []
+        for cluster_id in range(k):
+            sub_df = df[df['cluster'] == cluster_id]
+            medias = sub_df[cols_validas].mean().to_dict()
+            medias_arredondadas = {col: round(val, 2) for col, val in medias.items()}
+            
+            resumo_clusters.append({
+                "cluster_id": int(cluster_id),
+                "quantidade_elementos": len(sub_df),
+                "percentual_do_total": round((len(sub_df) / len(df)) * 100, 2),
+                "medias_das_caracteristicas": medias_arredondadas
+            })
+
+        return json.dumps({
+            "status": "sucesso",
+            "algoritmo": "K-Means Clustering",
+            "total_clusters": k,
+            "colunas_utilizadas": cols_validas,
+            "resumo_perfis_clusters": resumo_clusters
+        }, ensure_ascii=False)
+
+    except Exception as e:
+        return f"Erro no agrupamento de dados (Clustering): {str(e)}"
+
+@mcp.tool()
+def analisar_correlacao_e_importancia(dados_json: str, coluna_alvo: str, colunas_explicativas: List[str]) -> str:
+    """
+    [ML MOTOR 4 - EXPLAINABILITY & FEATURE IMPORTANCE]
+    Avalia a importância relativa de cada variável para explicar uma métrica-alvo
+    usando RandomForest e gera a matriz de correlação estatística.
+    """
+    try:
+        dados = json.loads(dados_json)
+        if isinstance(dados, dict) and "linhas" in dados and "colunas" in dados:
+            df = pd.DataFrame(dados["linhas"], columns=dados["colunas"])
+        elif isinstance(dados, list):
+            df = pd.DataFrame(dados)
+        else:
+            df = pd.DataFrame(dados)
+
+        if df.empty or coluna_alvo not in df.columns:
+            return f"Erro: A coluna alvo '{coluna_alvo}' não foi encontrada nos dados."
+
+        cols_exp = [c for c in colunas_explicativas if c in df.columns and c != coluna_alvo]
+        if not cols_exp:
+            return "Erro: Nenhuma coluna explicativa válida foi fornecida."
+
+        df_clean = df[[coluna_alvo] + cols_exp].apply(pd.to_numeric, errors='coerce').dropna()
+
+        if len(df_clean) < 10:
+            return "Erro: Dados insuficientes após limpeza para calcular importância estatística."
+
+        X = df_clean[cols_exp]
+        y = df_clean[coluna_alvo]
+
+        rf = RandomForestRegressor(n_estimators=50, random_state=42)
+        rf.fit(X, y)
+
+        importancias = []
+        for col, imp in zip(cols_exp, rf.feature_importances_):
+            importancias.append({
+                "variavel": col,
+                "importancia_percentual": round(float(imp) * 100, 2)
+            })
+
+        importancias = sorted(importancias, key=lambda x: x["importancia_percentual"], reverse=True)
+
+        correlacoes = df_clean.corr()[coluna_alvo].drop(coluna_alvo).to_dict()
+        correlacoes_fmt = {col: round(val, 3) for col, val in correlacoes.items()}
+
+        return json.dumps({
+            "status": "sucesso",
+            "variavel_alvo": coluna_alvo,
+            "ranking_importancia_variaveis": importancias,
+            "correlacao_linear_pearson": correlacoes_fmt
+        }, ensure_ascii=False)
+
+    except Exception as e:
+        return f"Erro na análise de importância/correlação: {str(e)}"
+
+@mcp.tool()
+def testar_hipotese_estatistica(dados_json: str, coluna_grupo: str, coluna_metrica: str) -> str:
+    """
+    [ML MOTOR 5 - TESTE DE HIPÓTESE / A/B TESTING]
+    Realiza teste T de Student em duas amostras para comprovar se a diferença entre dois grupos
+    (ex: Filial A vs B, Período Antes vs Depois) é estatisticamente significante.
+    """
+    try:
+        dados = json.loads(dados_json)
+        if isinstance(dados, dict) and "linhas" in dados and "colunas" in dados:
+            df = pd.DataFrame(dados["linhas"], columns=dados["colunas"])
+        elif isinstance(dados, list):
+            df = pd.DataFrame(dados)
+        else:
+            df = pd.DataFrame(dados)
+
+        if df.empty or coluna_grupo not in df.columns or coluna_metrica not in df.columns:
+            return f"Erro: Colunas '{coluna_grupo}' ou '{coluna_metrica}' não encontradas nos dados."
+
+        df[coluna_metrica] = pd.to_numeric(df[coluna_metrica], errors='coerce')
+        grupos = df[coluna_grupo].unique()
+
+        if len(grupos) != 2:
+            return f"Erro: O Teste T exige exatamente 2 grupos distintos na coluna '{coluna_grupo}'. Grupos encontrados: {list(grupos)}"
+
+        grupo_a = df[df[coluna_grupo] == grupos[0]][coluna_metrica].dropna()
+        grupo_b = df[df[coluna_grupo] == grupos[1]][coluna_metrica].dropna()
+
+        stat, p_valor = stats.ttest_ind(grupo_a, grupo_b, equal_var=False)
+        significante = bool(p_valor < 0.05)
+
+        return json.dumps({
+            "status": "sucesso",
+            "grupo_1": str(grupos[0]),
+            "media_grupo_1": round(float(grupo_a.mean()), 2),
+            "grupo_2": str(grupos[1]),
+            "media_grupo_2": round(float(grupo_b.mean()), 2),
+            "diferenca_abs_medias": round(float(abs(grupo_a.mean() - grupo_b.mean())), 2),
+            "p_valor": round(float(p_valor), 5),
+            "estatisticamente_significante_95pct": significante,
+            "conclusao": "Há diferença estatística comprovada entre os grupos (p < 0.05)." if significante else "A diferença pode ser fruto do acaso/ruído (p >= 0.05)."
+        }, ensure_ascii=False)
+
+    except Exception as e:
+        return f"Erro ao realizar teste de hipótese estatística: {str(e)}"
 
 if __name__ == "__main__":
     mcp.run()
