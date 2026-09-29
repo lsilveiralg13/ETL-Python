@@ -1,12 +1,41 @@
+# --- Arquivos do Sistema e Git ---
 .git
+.github
+.vscode
 .gitignore
+.env
+*.log
+
+# --- Ambientes Virtuais e Cache Python ---
 .venv
 venv
-__pycache__
+ENV/
+env/
+__pycache__/
 *.pyc
+*.pyo
+*.pyd
 .pytest_cache
-.env
-downloads/
-data/
-*.log
-.DS_Store
+
+# --- Pastas de Documentação, Projetos Paralelos e Backups ---
+B.I - Lucas/
+Backup_Ambiente_Python_20260529_150400/
+CERTIFICADOS/
+Códigos Úteis SQL/
+DOCUMENTAÇÕES/
+erros_automacao/
+ETL - Constance/
+ETL - MULTIMARCAS/
+IMAGENS/
+MYSQLDUMP/
+Scripts Python/
+scripts_sql/
+ScriptsSQL - Belmicro/
+ScriptsSQL - Constance/
+SQL - Databricks/
+SQLServer - Scripts/
+dist/
+docs/
+
+# --- Outras pastas desnecessárias para o agente Vetra ---
+# (Manteremos apenas utils, config, core, static, templates e scripts de ingesta/transformacao se o app os importar)
