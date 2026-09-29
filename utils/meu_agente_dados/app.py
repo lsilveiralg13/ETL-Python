@@ -1125,7 +1125,7 @@ if prompt:
                 except Exception as e:
                     st.warning(f"Não foi possível renderizar a visualização tabular/gráfica: {e}")
 
-                        # MASCARAMENTO DE PII (LGPD)
+            # MASCARAMENTO DE PII (LGPD)
                         if st.session_state.preferencias_usuario.get("mascarar_pii", True):
                             df_exibicao, cols_mascaradas = aplicar_mascaramento_pii(df_bruto)
                             if cols_mascaradas:
@@ -1184,7 +1184,6 @@ if prompt:
 
                 except Exception as e:
                     st.warning(f"Não foi possível renderizar a visualização tabular/gráfica: {e}")
-
             # LOOP DE FEEDBACK DO RAG & AVALIAÇÃO TRIAD
             if mcp_chamado and retorno_mcp and "buscar_conhecimento_rag" in str(retorno_mcp):
                 st.markdown("---")
