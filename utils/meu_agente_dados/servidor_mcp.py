@@ -435,4 +435,371 @@ def consultar_indicadores_bcb(codigo_serie: int = 432) -> str:
             "linhas": df.values.tolist()
         }
         res_str = json.dumps(retorno, ensure_ascii=False, indent=2)
-        return f"```json\n{res_str}\n
+        return f"```json\n{res_str}\n```"
+    except Exception as e:
+        return f"Erro no Banco Central: {str(e)}"
+
+@mcp.tool()
+@com_cache(ttl_segundos=600)
+def consultar_cnpj_brasilapi(cnpj: str) -> str:
+    """Consulta dados cadastrais em tempo real de empresas na Receita Federal via BrasilAPI."""
+    try:
+        cnpj_limpo = re.sub(r'\D', '', cnpj)
+        url = f"https://brasilapi.com.br/api/cnpj/v1/{cnpj_limpo}"
+        res = requests.get(url, timeout=10)
+        if res.status_code != 200:
+            return f"CNPJ {cnpj} não encontrado."
+            
+        d = res.json()
+        info = {
+            "razao_social": d.get("razao_social"),
+            "nome_fantasia": d.get("nome_fantasia"),
+            "cnpj": d.get("cnpj"),
+            "situacao_cadastral": d.get("descricao_situacao_cadastral"),
+            "cnae_fiscal_descricao": d.get("cnae_fiscal_descricao"),
+            "uf": d.get("uf"),
+            "municipio": d.get("municipio"),
+            "capital_social": d.get("capital_social")
+        }
+        return json.dumps(info, ensure_ascii=False, indent=2)
+    except Exception as e:
+        return f"Erro na consulta de CNPJ: {str(e)}"
+
+@mcp.tool()
+@com_cache(ttl_segundos=600)
+def consultar_cep_brasilapi(cep: str) -> str:
+    """Consulta endereço e geolocalização por CEP via BrasilAPI."""
+    try:
+        cep_limpo = re.sub(r'\D', '', cep)
+        url = f"https://brasilapi.com.br/api/cep/v2/{cep_limpo}"
+        res = requests.get(url, timeout=10)
+        if res.status_code != 200:
+            return f"CEP {cep} não encontrado."
+            
+        return json.dumps(res.json(), ensure_ascii=False, indent=2)
+    except Exception as e:
+        return f"Erro na consulta de CEP: {str(e)}"
+
+@mcp.tool()
+@com_cache(ttl_segundos=180)
+def consultar_cotacao_moeda(par_moedas: str = "USD-BRL,EUR-BRL") -> str:
+    """Consulta cotações e variações percentuais em tempo real via AwesomeAPI."""
+    try:
+        url = f"https://economia.awesomeapi.com.br/last/{par_moedas}"
+        res = requests.get(url, timeout=5)
+        if res.status_code != 200:
+            return f"Erro em cotações: Status {res.status_code}"
+            
+        dados = res.json()
+        linhas = []
+        for chave, info in dados.items():
+            linhas.append([
+                info.get("name"),
+                float(info.get("bid", 0)),
+                float(info.get("ask", 0)),
+                f"{info.get('pctChange')}%",
+                info.get("create_date")
+            ])
+            
+        retorno = {
+            "colunas": ["moeda", "valor_compra", "valor_venda", "variacao_pct", "ultima_atualizacao"],
+            "linhas": linhas
+        }
+        res_str = json.dumps(retorno, ensure_ascii=False, indent=2)
+        return f"```json\n{res_str}\n```"
+    except Exception as e:
+        return f"Erro em cotações: {str(e)}"
+
+@mcp.tool()
+@com_cache(ttl_segundos=300)
+def geocodificar_endereco(localidade: str) -> str:
+    """Obtém coordenadas geográficas (Lat/Lon) via OpenStreetMap."""
+    try:
+        url = f"https://nominatim.openstreetmap.org/search?q={localidade}&format=json&limit=1"
+        headers = {"User-Agent": "VetraDataAgent/1.0"}
+        res = requests.get(url, headers=headers, timeout=10)
+        
+        if res.status_code != 200 or not res.json():
+            return f"Localidade '{localidade}' não encontrada."
+            
+        item = res.json()[0]
+        return json.dumps({
+            "nome": item.get("display_name"),
+            "latitude": float(item.get("lat")),
+            "longitude": float(item.get("lon"))
+        }, ensure_ascii=False, indent=2)
+    except Exception as e:
+        return f"Erro na geocodificação: {str(e)}"
+
+@mcp.tool()
+@com_cache(ttl_segundos=600)
+def consultar_clima_open_meteo(latitude: float = -19.9167, longitude: float = -43.9345) -> str:
+    """Consulta condições meteorológicas atuais via Open-Meteo API."""
+    try:
+        url = f"https://api.open-meteo.com/v1/forecast?latitude={latitude}&longitude={longitude}&current_weather=true"
+        res = requests.get(url, timeout=10)
+        if res.status_code != 200:
+            return f"Erro ao acessar Open-Meteo: Status {res.status_code}"
+            
+        d = res.json().get("current_weather", {})
+        info = {
+            "temperatura_celsius": d.get("temperature"),
+            "velocidade_vento_kmh": d.get("windspeed"),
+            "direcao_vento": d.get("winddirection"),
+            "horario": d.get("time")
+        }
+        return json.dumps(info, ensure_ascii=False, indent=2)
+    except Exception as e:
+        return f"Erro ao consultar clima: {str(e)}"
+
+@mcp.tool()
+@com_cache(ttl_segundos=300)
+def consultar_futebol_liga(codigo_liga: str = "BSA") -> str:
+    """Consulta a classificação em tempo real do Campeonato Brasileiro ou ligas internacionais."""
+    try:
+        url = f"https://api.football-data.org/v4/competitions/{codigo_liga}/standings"
+        api_token = os.environ.get("FOOTBALL_DATA_API_KEY", "")
+        headers = {"X-Auth-Token": api_token} if api_token else {}
+        
+        res = requests.get(url, headers=headers, timeout=10)
+        if res.status_code != 200:
+            return f"⚠️ API Futebol retornou status {res.status_code}."
+            
+        dados = res.json()
+        standings = dados.get("standings", [])
+        if not standings:
+            return "Nenhum dado de tabela disponível para esta competição no momento."
+            
+        tabela = standings[0].get("table", [])
+        linhas = []
+        for item in tabela:
+            linhas.append([
+                item.get("position"),
+                item.get("team", {}).get("name"),
+                item.get("points"),
+                item.get("playedGames"),
+                item.get("won")
+            ])
+            
+        retorno = {
+            "liga": dados.get("competition", {}).get("name", "Campeonato Brasileiro"),
+            "colunas": ["posicao", "clube", "pontos", "jogos", "vitorias"],
+            "linhas": linhas
+        }
+        res_str = json.dumps(retorno, ensure_ascii=False, indent=2)
+        return f"```json\n{res_str}\n```"
+    except Exception as e:
+        return f"Erro ao consultar API de futebol: {str(e)}"
+
+# -----------------------------------------------------------------------------
+# MOTORES DE MACHINE LEARNING E ESTATÍSTICA
+# -----------------------------------------------------------------------------
+@mcp.tool()
+def gerar_previsao_generica(dados_json: str, coluna_data: str, coluna_alvo: str, periodos_frente: int = 30) -> str:
+    """Projeta uma variável numérica ao longo do tempo usando Suavização Exponencial."""
+    try:
+        dados = json.loads(dados_json)
+        df = pd.DataFrame(dados["linhas"], columns=dados["colunas"]) if isinstance(dados, dict) and "linhas" in dados else pd.DataFrame(dados)
+
+        if df.empty or coluna_data not in df.columns or coluna_alvo not in df.columns:
+            return f"Erro: Os dados devem conter as colunas '{coluna_data}' e '{coluna_alvo}'."
+
+        df[coluna_data] = pd.to_datetime(df[coluna_data])
+        df[coluna_alvo] = pd.to_numeric(df[coluna_alvo], errors='coerce')
+        df = df.dropna(subset=[coluna_data, coluna_alvo]).sort_values(by=coluna_data)
+
+        if len(df) < 5:
+            return "Erro: O histórico é muito curto para gerar um modelo preditivo (mínimo de 5 pontos)."
+
+        df_ts = df.groupby(coluna_data)[coluna_alvo].sum().asfreq('D').ffill().bfill()
+
+        try:
+            modelo = ExponentialSmoothing(df_ts, trend='add', seasonal=None).fit()
+        except Exception:
+            modelo = SimpleExpSmoothing(df_ts).fit()
+
+        previsao = modelo.forecast(periodos_frente)
+        datas_futuras = pd.date_range(start=df_ts.index[-1] + pd.Timedelta(days=1), periods=periodos_frente, freq='D')
+        
+        resultado_pred = [{"data": d.strftime('%Y-%m-%d'), "valor_previsto": round(float(v), 2)} for d, v in zip(datas_futuras, previsao)]
+        historico_recente = [{"data": d.strftime('%Y-%m-%d'), "valor_historico": round(float(v), 2)} for d, v in zip(df_ts.index[-10:], df_ts.values[-10:])]
+
+        return json.dumps({
+            "status": "sucesso",
+            "modelo_utilizado": modelo.__class__.__name__,
+            "periodos_projetados": periodos_frente,
+            "historico_recente": historico_recente,
+            "previsoes": resultado_pred
+        }, ensure_ascii=False)
+
+    except Exception as e:
+        return f"Erro ao gerar previsão de Machine Learning: {str(e)}"
+
+@mcp.tool()
+def detectar_anomalias_generico(dados_json: str, colunas_analise: List[str], sensibilidade: float = 0.05) -> str:
+    """Identifica padrões atípicos e outliers utilizando Isolation Forest."""
+    try:
+        dados = json.loads(dados_json)
+        df = pd.DataFrame(dados["linhas"], columns=dados["colunas"]) if isinstance(dados, dict) and "linhas" in dados else pd.DataFrame(dados)
+
+        if df.empty:
+            return "Erro: O conjunto de dados fornecido está vazio."
+
+        cols_validas = [c for c in colunas_analise if c in df.columns]
+        if not cols_validas:
+            return f"Erro: Nenhuma das colunas {colunas_analise} foi encontrada no dataset."
+
+        X = df[cols_validas].copy()
+        for col in cols_validas:
+            X[col] = pd.to_numeric(X[col], errors='coerce')
+        
+        X_imputed = SimpleImputer(strategy='median').fit_transform(X)
+        X_scaled = StandardScaler().fit_transform(X_imputed)
+
+        model = IsolationForest(contamination=max(0.01, min(0.2, sensibilidade)), random_state=42)
+        df['anomalia_score'] = model.fit_predict(X_scaled)
+        
+        anomalias = df[df['anomalia_score'] == -1].copy()
+        amostra = anomalias.head(15).drop(columns=['anomalia_score']).to_dict(orient='records')
+
+        return json.dumps({
+            "status": "sucesso",
+            "algoritmo": "Isolation Forest",
+            "total_linhas_analisadas": len(df),
+            "total_anomalias_encontradas": len(anomalias),
+            "percentual_anomalias": round((len(anomalias) / len(df)) * 100, 2),
+            "colunas_avaliadas": cols_validas,
+            "amostra_anomalias_detectadas": amostra
+        }, ensure_ascii=False)
+
+    except Exception as e:
+        return f"Erro na detecção de anomalias: {str(e)}"
+
+@mcp.tool()
+def agrupar_dados_generico(dados_json: str, colunas_caracteristicas: List[str], num_clusters: int = 0) -> str:
+    """Descobre agrupamentos e perfis nos dados utilizando K-Means."""
+    try:
+        dados = json.loads(dados_json)
+        df = pd.DataFrame(dados["linhas"], columns=dados["colunas"]) if isinstance(dados, dict) and "linhas" in dados else pd.DataFrame(dados)
+
+        if df.empty:
+            return "Erro: O conjunto de dados fornecido está vazio."
+
+        cols_validas = [c for c in colunas_caracteristicas if c in df.columns]
+        if not cols_validas:
+            return f"Erro: Nenhuma coluna válida encontrada entre {colunas_caracteristicas}."
+
+        X = df[cols_validas].copy()
+        for col in cols_validas:
+            X[col] = pd.to_numeric(X[col], errors='coerce')
+
+        X_imputed = SimpleImputer(strategy='mean').fit_transform(X)
+        X_scaled = StandardScaler().fit_transform(X_imputed)
+
+        k = num_clusters if num_clusters >= 2 else min(4, max(2, len(df) // 10))
+        kmeans = KMeans(n_clusters=k, random_state=42, n_init=10)
+        df['cluster'] = kmeans.fit_predict(X_scaled)
+
+        resumo_clusters = []
+        for cluster_id in range(k):
+            sub_df = df[df['cluster'] == cluster_id]
+            medias = sub_df[cols_validas].mean().to_dict()
+            resumo_clusters.append({
+                "cluster_id": int(cluster_id),
+                "quantidade_elementos": len(sub_df),
+                "percentual_do_total": round((len(sub_df) / len(df)) * 100, 2),
+                "medias_das_caracteristicas": {col: round(val, 2) for col, val in medias.items()}
+            })
+
+        return json.dumps({
+            "status": "sucesso",
+            "algoritmo": "K-Means Clustering",
+            "total_clusters": k,
+            "colunas_utilizadas": cols_validas,
+            "resumo_perfis_clusters": resumo_clusters
+        }, ensure_ascii=False)
+
+    except Exception as e:
+        return f"Erro no agrupamento de dados (Clustering): {str(e)}"
+
+@mcp.tool()
+def analisar_correlacao_e_importancia(dados_json: str, coluna_alvo: str, colunas_explicativas: List[str]) -> str:
+    """Avalia a importância relativa de cada variável para explicar uma métrica-alvo."""
+    try:
+        dados = json.loads(dados_json)
+        df = pd.DataFrame(dados["linhas"], columns=dados["colunas"]) if isinstance(dados, dict) and "linhas" in dados else pd.DataFrame(dados)
+
+        if df.empty or coluna_alvo not in df.columns:
+            return f"Erro: A coluna alvo '{coluna_alvo}' não foi encontrada nos dados."
+
+        cols_exp = [c for c in colunas_explicativas if c in df.columns and c != coluna_alvo]
+        if not cols_exp:
+            return "Erro: Nenhuma coluna explicativa válida foi fornecida."
+
+        df_clean = df[[coluna_alvo] + cols_exp].apply(pd.to_numeric, errors='coerce').dropna()
+
+        if len(df_clean) < 10:
+            return "Erro: Dados insuficientes após limpeza para calcular importância estatística."
+
+        X = df_clean[cols_exp]
+        y = df_clean[coluna_alvo]
+
+        rf = RandomForestRegressor(n_estimators=50, random_state=42)
+        rf.fit(X, y)
+
+        importancias = sorted([
+            {"variavel": col, "importancia_percentual": round(float(imp) * 100, 2)}
+            for col, imp in zip(cols_exp, rf.feature_importances_)
+        ], key=lambda x: x["importancia_percentual"], reverse=True)
+
+        correlacoes = {col: round(val, 3) for col, val in df_clean.corr()[coluna_alvo].drop(coluna_alvo).to_dict().items()}
+
+        return json.dumps({
+            "status": "sucesso",
+            "variavel_alvo": coluna_alvo,
+            "ranking_importancia_variaveis": importancias,
+            "correlacao_linear_pearson": correlacoes
+        }, ensure_ascii=False)
+
+    except Exception as e:
+        return f"Erro na análise de importância/correlação: {str(e)}"
+
+@mcp.tool()
+def testar_hipotese_estatistica(dados_json: str, coluna_grupo: str, coluna_metrica: str) -> str:
+    """Realiza teste T de Student em duas amostras para comprovar se a diferença entre dois grupos é significante."""
+    try:
+        dados = json.loads(dados_json)
+        df = pd.DataFrame(dados["linhas"], columns=dados["colunas"]) if isinstance(dados, dict) and "linhas" in dados else pd.DataFrame(dados)
+
+        if df.empty or coluna_grupo not in df.columns or coluna_metrica not in df.columns:
+            return f"Erro: Colunas '{coluna_grupo}' ou '{coluna_metrica}' não encontradas nos dados."
+
+        df[coluna_metrica] = pd.to_numeric(df[coluna_metrica], errors='coerce')
+        grupos = df[coluna_grupo].unique()
+
+        if len(grupos) != 2:
+            return f"Erro: O Teste T exige exatamente 2 grupos distintos. Grupos encontrados: {list(grupos)}"
+
+        grupo_a = df[df[coluna_grupo] == grupos[0]][coluna_metrica].dropna()
+        grupo_b = df[df[coluna_grupo] == grupos[1]][coluna_metrica].dropna()
+
+        stat, p_valor = stats.ttest_ind(grupo_a, grupo_b, equal_var=False)
+        significante = bool(p_valor < 0.05)
+
+        return json.dumps({
+            "status": "sucesso",
+            "grupo_1": str(grupos[0]),
+            "media_grupo_1": round(float(grupo_a.mean()), 2),
+            "grupo_2": str(grupos[1]),
+            "media_grupo_2": round(float(grupo_b.mean()), 2),
+            "diferenca_abs_medias": round(float(abs(grupo_a.mean() - grupo_b.mean())), 2),
+            "p_valor": round(float(p_valor), 5),
+            "estatisticamente_significante_95pct": significante,
+            "conclusao": "Há diferença estatística comprovada entre os grupos (p < 0.05)." if significante else "A diferença pode ser fruto do acaso/ruído (p >= 0.05)."
+        }, ensure_ascii=False)
+
+    except Exception as e:
+        return f"Erro ao realizar teste de hipótese estatística: {str(e)}"
+
+if __name__ == "__main__":
+    mcp.run()
