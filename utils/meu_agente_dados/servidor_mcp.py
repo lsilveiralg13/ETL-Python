@@ -353,6 +353,8 @@ def calcular_indicador_otif(unidade: Optional[str] = None) -> str:
     }
     return f"```json\n{json.dumps(resultado, ensure_ascii=False, indent=2)}\n```"
 
+```python
+# CÓDIGO CORRIGIDO:
 @mcp.tool()
 @com_cache(ttl_segundos=180)
 def calcular_lead_time_producao(linha_produto: str = "Geral") -> str:
@@ -364,4 +366,5 @@ def calcular_lead_time_producao(linha_produto: str = "Geral") -> str:
         "eficiencia_geral_oee": "87.4%",
         "gargalo_identificado": "Etapa de Pintura / Carga Térmica"
     }
-    return f"```json\n{json.dumps(metricas, ensure_ascii=False, indent=2)}\n
+    resultado = json.dumps(metricas, ensure_ascii=False, indent=2)
+    return f"```json\n{resultado}\n```"
