@@ -22,7 +22,7 @@ st.set_page_config(
 )
 
 # Trata a URL da API para garantir que temos apenas a base do servidor sem sufixos de rotas antigos
-RAW_API_URL = os.environ.get("VETRA_API_URL", "http://127.0.0.1:8000")
+RAW_API_URL = os.environ.get("VETRA_API_URL", "http://localhost:8000")
 API_BASE_URL = re.sub(r'/(chat|chat/stream)/?$', '', RAW_API_URL).rstrip("/")
 
 # Tabela de Preços Estimados (Gemini Flash Pay-as-you-go) por 1 Milhão de Tokens (USD)

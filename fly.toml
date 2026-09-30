@@ -6,7 +6,7 @@ primary_region = "gru"
 
 [env]
   PYTHONUNBUFFERED = "1"
-  VETRA_API_URL = "http://127.0.0.1:8000"
+  VETRA_API_URL = "http://localhost:8000"
 
 [http_service]
   internal_port = 8501
