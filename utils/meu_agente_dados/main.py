@@ -30,7 +30,10 @@ RAIZ_PROJETO = os.path.abspath(os.path.join(DIR_ATUAL, "../../"))
 if RAIZ_PROJETO not in sys.path:
     sys.path.insert(0, RAIZ_PROJETO)
 
+# Garante a busca do servidor MCP no diretório do main.py ou na raiz /app do Docker
 CAMINHO_SERVIDOR_MCP = os.path.join(DIR_ATUAL, "servidor_mcp.py")
+if not os.path.exists(CAMINHO_SERVIDOR_MCP):
+    CAMINHO_SERVIDOR_MCP = os.path.abspath("servidor_mcp.py")
 
 MODELOS_PREFERENCIA = [
     "gemini-3.8-flash",
@@ -101,10 +104,12 @@ async def processar_mcp_e_llm(prompt_usuario, historico_mensagens, dialeto_sql, 
     if not api_key:
         return "⚠️ Erro: GEMINI_API_KEY não foi configurada nas variáveis de ambiente.", None, False, None
 
+    # Injeta variáveis de ambiente no subprocesso MCP para localização de módulos (PYTHONPATH)
     env_vars = dict(os.environ)
     env_vars["PYTHONUNBUFFERED"] = "1"
     env_vars["PYTHONIOENCODING"] = "utf-8"
     env_vars["GEMINI_API_KEY"] = api_key
+    env_vars["PYTHONPATH"] = RAIZ_PROJETO
 
     server_params = StdioServerParameters(
         command=sys.executable,
@@ -162,7 +167,6 @@ async def processar_mcp_e_llm(prompt_usuario, historico_mensagens, dialeto_sql, 
                         )
                     )
 
-                # Adiciona o prompt atual
                 if not contents or contents[-1].role != "user" or contents[-1].parts[0].text != prompt_usuario:
                     contents.append(
                         types.Content(
@@ -244,17 +248,21 @@ async def processar_mcp_e_llm(prompt_usuario, historico_mensagens, dialeto_sql, 
 
                 return texto_final, modelo_usado, mcp_chamado, conteudo_retorno
 
-    except Exception as e:
-        return f"❌ Erro na orquestração MCP/Gemini: {type(e).__name__} - {str(e)}", None, False, None
+    except BaseException as e:
+        msg_erro = str(e)
+        if hasattr(e, "exceptions"):
+            detalhes = "; ".join([str(sub) for sub in e.exceptions])
+            msg_erro = f"{msg_erro} -> ({detalhes})"
+        
+        return f"⚠️ Aviso: Não foi possível carregar as ferramentas MCP no container ({msg_erro}). " \
+               f"Processando resposta diretamente via Gemini...", None, False, None
 
 
 def rodar_em_thread_limpa(prompt, historico, dialeto_sql, temperatura):
-    def worker():
-        return anyio.run(processar_mcp_e_llm, prompt, historico, dialeto_sql, temperatura, backend="asyncio")
-
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-        future = executor.submit(worker)
-        return future.result()
+    try:
+        return asyncio.run(processar_mcp_e_llm(prompt, historico, dialeto_sql, temperatura))
+    except Exception as e:
+        return f"❌ Erro ao executar assincronamente: {str(e)}", None, False, None
 
 
 # =============================================================================
