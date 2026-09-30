@@ -21,8 +21,8 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# URL da API Backend (Pode ser ajustada para a URL do Fly.io ou localhost)
-API_URL = os.environ.get("VETRA_API_URL", "http://localhost:8000/chat")
+# URL da API Backend (Endereço e rota local padronizados para o FastAPI na porta 8000)
+API_URL = os.environ.get("VETRA_API_URL", "http://127.0.0.1:8000/chat")
 
 # Tabela de Preços Estimados (Gemini Flash Pay-as-you-go) por 1 Milhão de Tokens (USD)
 PRECO_INPUT_1M = 0.075   # $0,075 por 1M tokens de entrada
@@ -185,6 +185,7 @@ def analisar_explain_plan_sql(sql_query: str) -> list[str]:
 def chamar_api_backend(prompt: str, historico: list, dialeto_sql: str, temperatura: float):
     """Envia o payload em formato JSON para o backend da Vetra via HTTP POST."""
     payload = {
+        "message": prompt,
         "prompt": prompt,
         "historico": historico,
         "dialeto_sql": dialeto_sql,
@@ -195,7 +196,7 @@ def chamar_api_backend(prompt: str, historico: list, dialeto_sql: str, temperatu
         if response.status_code == 200:
             dados = response.json()
             return (
-                dados.get("resposta", "Sem resposta do backend."),
+                dados.get("response", dados.get("resposta", "Sem resposta do backend.")),
                 dados.get("modelo_usado", "FastAPI-Backend"),
                 dados.get("mcp_chamado", False),
                 dados.get("dados_mcp_raw", None)
