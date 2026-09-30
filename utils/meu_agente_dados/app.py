@@ -21,8 +21,8 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# URL da API Backend (Endereço e rota local padronizados para o FastAPI na porta 8000)
-API_URL = os.environ.get("VETRA_API_URL", "http://127.0.0.1:8000/chat")
+# URL da API Backend (Endereço padronizado para a rota de streaming da API)
+API_URL = os.environ.get("VETRA_API_URL", "http://127.0.0.1:8000/chat/stream")
 
 # Tabela de Preços Estimados (Gemini Flash Pay-as-you-go) por 1 Milhão de Tokens (USD)
 PRECO_INPUT_1M = 0.075   # $0,075 por 1M tokens de entrada
@@ -159,7 +159,7 @@ def executar_sanity_check_df(df: pd.DataFrame) -> list[str]:
         if any(kw in col_lower for kw in ['otif', 'qtd', 'quantidade', 'valor', 'total', 'lead_time', 'preco']):
             negativos = (df[col] < 0).sum()
             if negativos > 0:
-                alertas.append(f"⚠️ **Inconsistência Numérica**: `{col}` possui {negativos} valores negativos inesperados.")
+                alertas.append(f"⚠️️ **Inconsistência Numérica**: `{col}` possui {negativos} valores negativos inesperados.")
                 
     return alertas
 
@@ -183,34 +183,57 @@ def analisar_explain_plan_sql(sql_query: str) -> list[str]:
 
 
 def chamar_api_backend(prompt: str, historico: list, dialeto_sql: str, temperatura: float):
-    """Envia o payload em formato JSON para o backend da Vetra via HTTP POST."""
+    """Envia o payload e consome a rota SSE com streaming da API Backend."""
+    # Transforma 'model' em 'assistant' para garantir compatibilidade se necessário
+    historico_formatado = []
+    for m in historico:
+        historico_formatado.append({
+            "role": m.get("role", "user"),
+            "content": m.get("content", "")
+        })
+
     payload = {
-        "message": prompt,
         "prompt": prompt,
-        "session_id": "default",
-        "historico": historico,
+        "historico": historico_formatado,
         "dialeto_sql": dialeto_sql,
         "temperatura": temperatura
     }
+
     try:
+        url_alvo = API_URL if API_URL.endswith("/chat/stream") else API_URL.replace("/chat", "/chat/stream")
+        
         response = requests.post(
-            API_URL, 
+            url_alvo, 
             json=payload, 
             headers={"Content-Type": "application/json"},
-            timeout=60
+            stream=True,
+            timeout=300
         )
+        
         if response.status_code == 200:
-            dados = response.json()
-            return (
-                dados.get("response", dados.get("resposta", "Sem resposta do backend.")),
-                dados.get("modelo_usado", "FastAPI-Backend"),
-                dados.get("mcp_chamado", False),
-                dados.get("dados_mcp_raw", None)
-            )
+            resposta_texto = ""
+            modelo_usado = "FastAPI-Backend"
+            mcp_chamado = False
+            dados_mcp_raw = None
+
+            for line in response.iter_lines():
+                if line:
+                    linha_str = line.decode("utf-8")
+                    if linha_str.startswith("data: "):
+                        conteudo = json.loads(linha_str[6:])
+                        if "error" in conteudo:
+                            return f"❌ Erro no backend: {conteudo['error']}", None, False, None
+                        if "resposta" in conteudo:
+                            resposta_texto = conteudo.get("resposta", "")
+                            modelo_usado = conteudo.get("modelo_usado", modelo_usado)
+                            mcp_chamado = conteudo.get("mcp_chamado", False)
+                            dados_mcp_raw = conteudo.get("dados_mcp_raw", None)
+
+            return resposta_texto, modelo_usado, mcp_chamado, dados_mcp_raw
         else:
             return f"❌ Erro na API Backend (Status {response.status_code}): {response.text}", None, False, None
-            
-    except requests.exceptions.ConnectionError as e:
+
+    except requests.exceptions.ConnectionError:
         return f"❌ Não foi possível conectar ao servidor backend da Vetra ({API_URL}). Certifique-se de que a API FastAPI está ativa.", None, False, None
     except requests.exceptions.Timeout:
         return "❌ Tempo limite excedido (Timeout) aguardando resposta do backend.", None, False, None

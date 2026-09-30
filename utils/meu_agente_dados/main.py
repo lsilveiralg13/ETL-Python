@@ -6,6 +6,7 @@ import concurrent.futures
 from typing import List, Optional
 
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 import anyio
 
@@ -281,3 +282,29 @@ async def chat_endpoint(payload: ChatRequest):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/chat/stream")
+async def chat_stream_endpoint(payload: ChatRequest):
+    """Endpoint SSE para transmitir o progresso e o resultado via streaming."""
+    def event_generator():
+        try:
+            historico_dict = [m.model_dump() for m in payload.historico]
+
+            # Notifica que o processamento do MCP / Gemini começou
+            yield f"data: {json.dumps({'chunk': '⌛ *Consultando inteligência de dados e MCP...*\n\n'})}\n\n"
+
+            resposta, modelo_usado, mcp_chamado, retorno_mcp = rodar_em_thread_limpa(
+                payload.prompt,
+                historico_dict,
+                payload.dialeto_sql,
+                payload.temperatura
+            )
+
+            # Envia o conteúdo final completo
+            yield f"data: {json.dumps({'resposta': resposta, 'modelo_usado': modelo_usado, 'mcp_chamado': mcp_chamado, 'dados_mcp_raw': retorno_mcp})}\n\n"
+
+        except Exception as e:
+            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
