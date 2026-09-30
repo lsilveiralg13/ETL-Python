@@ -19,3 +19,4 @@ plotly
 openpyxl
 fastapi
 fastapi-cli
+sse-starlette
