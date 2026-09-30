@@ -17,3 +17,5 @@ pypdf
 anyio
 plotly
 openpyxl
+fastapi
+fastapi-cli
