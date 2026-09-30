@@ -21,8 +21,9 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# URL da API Backend (Endereço padronizado para a rota de streaming da API)
-API_URL = os.environ.get("VETRA_API_URL", "http://127.0.0.1:8000/chat/stream")
+# Trata a URL da API para garantir que temos apenas a base do servidor sem sufixos de rotas antigos
+RAW_API_URL = os.environ.get("VETRA_API_URL", "http://127.0.0.1:8000")
+API_BASE_URL = re.sub(r'/(chat|chat/stream)/?$', '', RAW_API_URL).rstrip("/")
 
 # Tabela de Preços Estimados (Gemini Flash Pay-as-you-go) por 1 Milhão de Tokens (USD)
 PRECO_INPUT_1M = 0.075   # $0,075 por 1M tokens de entrada
@@ -159,7 +160,7 @@ def executar_sanity_check_df(df: pd.DataFrame) -> list[str]:
         if any(kw in col_lower for kw in ['otif', 'qtd', 'quantidade', 'valor', 'total', 'lead_time', 'preco']):
             negativos = (df[col] < 0).sum()
             if negativos > 0:
-                alertas.append(f"⚠️️ **Inconsistência Numérica**: `{col}` possui {negativos} valores negativos inesperados.")
+                alertas.append(f"⚠️ **Inconsistência Numérica**: `{col}` possui {negativos} valores negativos inesperados.")
                 
     return alertas
 
@@ -183,14 +184,17 @@ def analisar_explain_plan_sql(sql_query: str) -> list[str]:
 
 
 def chamar_api_backend(prompt: str, historico: list, dialeto_sql: str, temperatura: float):
-    """Envia o payload e consome a rota SSE com streaming da API Backend."""
-    # Transforma 'model' em 'assistant' para garantir compatibilidade se necessário
+    """
+    Envia o payload e consome o backend de forma altamente resiliente.
+    Prioriza a rota SSE (/chat/stream) e faz fallback automático para (/chat).
+    """
     historico_formatado = []
     for m in historico:
-        historico_formatado.append({
-            "role": m.get("role", "user"),
-            "content": m.get("content", "")
-        })
+        if isinstance(m, dict):
+            historico_formatado.append({
+                "role": m.get("role", "user"),
+                "content": m.get("content", "")
+            })
 
     payload = {
         "prompt": prompt,
@@ -199,11 +203,13 @@ def chamar_api_backend(prompt: str, historico: list, dialeto_sql: str, temperatu
         "temperatura": temperatura
     }
 
+    url_stream = f"{API_BASE_URL}/chat/stream"
+    url_sync = f"{API_BASE_URL}/chat"
+
+    # Tentativa 1: Rota com SSE (Streaming)
     try:
-        url_alvo = API_URL if API_URL.endswith("/chat/stream") else API_URL.replace("/chat", "/chat/stream")
-        
         response = requests.post(
-            url_alvo, 
+            url_stream, 
             json=payload, 
             headers={"Content-Type": "application/json"},
             stream=True,
@@ -218,23 +224,47 @@ def chamar_api_backend(prompt: str, historico: list, dialeto_sql: str, temperatu
 
             for line in response.iter_lines():
                 if line:
-                    linha_str = line.decode("utf-8")
+                    linha_str = line.decode("utf-8").strip()
                     if linha_str.startswith("data: "):
-                        conteudo = json.loads(linha_str[6:])
-                        if "error" in conteudo:
-                            return f"❌ Erro no backend: {conteudo['error']}", None, False, None
-                        if "resposta" in conteudo:
-                            resposta_texto = conteudo.get("resposta", "")
-                            modelo_usado = conteudo.get("modelo_usado", modelo_usado)
-                            mcp_chamado = conteudo.get("mcp_chamado", False)
-                            dados_mcp_raw = conteudo.get("dados_mcp_raw", None)
+                        try:
+                            conteudo = json.loads(linha_str[6:])
+                            if "error" in conteudo:
+                                return f"❌ Erro no backend: {conteudo['error']}", None, False, None
+                            if "resposta" in conteudo:
+                                resposta_texto = conteudo.get("resposta", "")
+                                modelo_usado = conteudo.get("modelo_usado", modelo_usado)
+                                mcp_chamado = conteudo.get("mcp_chamado", False)
+                                dados_mcp_raw = conteudo.get("dados_mcp_raw", None)
+                        except json.JSONDecodeError:
+                            continue
 
-            return resposta_texto, modelo_usado, mcp_chamado, dados_mcp_raw
+            if resposta_texto:
+                return resposta_texto, modelo_usado, mcp_chamado, dados_mcp_raw
+
+    except Exception:
+        pass  # Se falhar o streaming, tenta o fallback síncrono abaixo
+
+    # Tentativa 2: Fallback para a Rota Síncrona Clássica
+    try:
+        response = requests.post(
+            url_sync, 
+            json=payload, 
+            headers={"Content-Type": "application/json"},
+            timeout=180
+        )
+        if response.status_code == 200:
+            dados = response.json()
+            return (
+                dados.get("resposta", "Sem resposta do backend."),
+                dados.get("modelo_usado", "FastAPI-Backend"),
+                dados.get("mcp_chamado", False),
+                dados.get("dados_mcp_raw", None)
+            )
         else:
             return f"❌ Erro na API Backend (Status {response.status_code}): {response.text}", None, False, None
 
     except requests.exceptions.ConnectionError:
-        return f"❌ Não foi possível conectar ao servidor backend da Vetra ({API_URL}). Certifique-se de que a API FastAPI está ativa.", None, False, None
+        return f"❌ Não foi possível conectar ao servidor backend da Vetra ({API_BASE_URL}). Certifique-se de que a API FastAPI está ativa.", None, False, None
     except requests.exceptions.Timeout:
         return "❌ Tempo limite excedido (Timeout) aguardando resposta do backend.", None, False, None
     except Exception as e:
