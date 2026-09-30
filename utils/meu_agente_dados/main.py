@@ -13,10 +13,13 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from google import genai
 from google.genai import types
+from dotenv import load_dotenv
 
 # =============================================================================
 # CONFIGURAÇÃO DE CAMINHOS DO PROJETO
 # =============================================================================
+load_dotenv()  # Carrega as variáveis de ambiente do arquivo .env
+
 DIR_ATUAL = os.path.dirname(os.path.abspath(__file__))
 RAIZ_PROJETO = os.path.abspath(os.path.join(DIR_ATUAL, "../../"))
 if RAIZ_PROJETO not in sys.path:
