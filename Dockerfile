@@ -10,11 +10,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# Copiar requirements primeiro
-COPY requirements.txt .
+# Copiar o requirements exclusivo da Vetra
+COPY requirements-vetra.txt .
 
-# Instalar dependências sem cache do pip (sintaxe corrigida)
-RUN pip install --no-cache-dir --prefer-binary -r requirements.txt
+# Instalar as dependências leves da Vetra sem cache
+RUN pip install --no-cache-dir --prefer-binary -r requirements-vetra.txt
 
 # Copiar o código respeitando o .dockerignore
 COPY . .
