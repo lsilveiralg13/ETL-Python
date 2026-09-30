@@ -16,6 +16,9 @@ from google import genai
 from google.genai import types
 from dotenv import load_dotenv
 
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
 # =============================================================================
 # CONFIGURAÇÃO DE CAMINHOS DO PROJETO
 # =============================================================================
@@ -262,9 +265,9 @@ def health_check():
 
 
 @app.post("/chat")
-async def chat_endpoint(payload: ChatRequest):
+def chat_endpoint(payload: ChatRequest):
     try:
-        historico_dict = [m.model_dump() for m in payload.historico]
+        historico_dict = [m.model_dump() for m in payload.historico] if payload.historico else []
 
         resposta, modelo_usado, mcp_chamado, retorno_mcp = rodar_em_thread_limpa(
             payload.prompt,
@@ -282,7 +285,6 @@ async def chat_endpoint(payload: ChatRequest):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
 
 @app.post("/chat/stream")
 async def chat_stream_endpoint(payload: ChatRequest):
