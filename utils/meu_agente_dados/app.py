@@ -184,9 +184,6 @@ def analisar_explain_plan_sql(sql_query: str) -> list[str]:
 
 def chamar_api_backend(prompt: str, historico: list, dialeto_sql: str, temperatura: float):
     """Envia o payload em formato JSON para o backend da Vetra via HTTP POST."""
-    
-    # Payload formatado com as chaves padrão do FastAPI (message/session_id)
-    # e mantendo os parâmetros adicionais de contexto
     payload = {
         "message": prompt,
         "prompt": prompt,
@@ -195,7 +192,6 @@ def chamar_api_backend(prompt: str, historico: list, dialeto_sql: str, temperatu
         "dialeto_sql": dialeto_sql,
         "temperatura": temperatura
     }
-    
     try:
         response = requests.post(
             API_URL, 
@@ -203,7 +199,6 @@ def chamar_api_backend(prompt: str, historico: list, dialeto_sql: str, temperatu
             headers={"Content-Type": "application/json"},
             timeout=60
         )
-        
         if response.status_code == 200:
             dados = response.json()
             return (
@@ -213,8 +208,14 @@ def chamar_api_backend(prompt: str, historico: list, dialeto_sql: str, temperatu
                 dados.get("dados_mcp_raw", None)
             )
         else:
-            # Exibe o status e o corpo detalhado retornado pelo FastAPI (ex: erro 422 ou 500)
             return f"❌ Erro na API Backend (Status {response.status_code}): {response.text}", None, False, None
+            
+    except requests.exceptions.ConnectionError as e:
+        return f"❌ Não foi possível conectar ao servidor backend da Vetra ({API_URL}). Certifique-se de que a API FastAPI está ativa.", None, False, None
+    except requests.exceptions.Timeout:
+        return "❌ Tempo limite excedido (Timeout) aguardando resposta do backend.", None, False, None
+    except Exception as e:
+        return f"❌ Erro ao comunicar com o Backend: {str(e)}", None, False, None
 
 # =============================================================================
 # ESTILO — TEMA ESCURO HARMONIZADO
