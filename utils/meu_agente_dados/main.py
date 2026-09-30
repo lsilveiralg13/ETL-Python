@@ -1,24 +1,23 @@
 import os
 import sys
+import anyio
+import concurrent.futures
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import List, Optional
 
-# Garante a importação dos módulos centrais
+# Garante o path da raiz do projeto
 DIR_ATUAL = os.path.dirname(os.path.abspath(__file__))
-if DIR_ATUAL not in sys.path:
-    sys.path.insert(0, DIR_ATUAL)
-
-# Importa a lógica que já roda no seu agente
-from utils.meu_agente_dados.app import rodar_em_thread_limpa
+RAIZ_PROJETO = os.path.abspath(os.path.join(DIR_ATUAL, "../../"))
+if RAIZ_PROJETO not in sys.path:
+    sys.path.insert(0, RAIZ_PROJETO)
 
 app = FastAPI(
     title="Vetra API — Agente Consultivo de Dados",
-    version="1.0.0",
-    description="API do backend do agente de IA integrado ao servidor MCP"
+    version="1.0.0"
 )
 
-# Modelo do corpo da requisição (JSON)
+# Modelo do corpo da requisição
 class Mensagem(BaseModel):
     role: str
     content: str
@@ -29,20 +28,32 @@ class ChatRequest(BaseModel):
     dialeto_sql: Optional[str] = "PostgreSQL"
     temperatura: Optional[float] = 0.2
 
-# Endpoint principal da API
+@app.get("/health")
+def health_check():
+    return {"status": "online", "agente": "Vetra"}
+
 @app.post("/api/v1/chat")
 async def chat_endpoint(payload: ChatRequest):
     try:
-        # Converter mensagens do Pydantic para o formato de dicionário
+        # Tenta importar do app.py caso tenhas mantido a função lá
+        from utils.meu_agente_dados.app import processar_mcp_e_llm
+        
         historico_dict = [m.model_dump() for m in payload.historico]
         
-        # Executa a orquestração (LLM + MCP)
-        resposta, modelo_usado, mcp_chamado, retorno_mcp = rodar_em_thread_limpa(
-            payload.prompt,
-            historico_dict,
-            payload.dialeto_sql,
-            payload.temperatura
-        )
+        # Executa a função assíncrona do agente em thread limpa
+        def worker():
+            return anyio.run(
+                processar_mcp_e_llm, 
+                payload.prompt, 
+                historico_dict, 
+                payload.dialeto_sql, 
+                payload.temperatura, 
+                backend="asyncio"
+            )
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(worker)
+            resposta, modelo_usado, mcp_chamado, retorno_mcp = future.result()
 
         return {
             "status": "sucesso",
@@ -53,7 +64,3 @@ async def chat_endpoint(payload: ChatRequest):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/health")
-def health_check():
-    return {"status": "online", "agente": "Vetra"}
