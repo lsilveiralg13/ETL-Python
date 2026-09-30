@@ -22,11 +22,11 @@ COPY . .
 # Expor a porta do Streamlit (Web) e a porta interna da API FastAPI
 EXPOSE 8501 8000
 
-# Criar o script start.sh para subir a API Backend e o Frontend juntos
+# Garantir que o Uvicorn sobe na porta 8000 e o Streamlit na 8501
 RUN echo '#!/bin/sh\n\
 python -m uvicorn utils.meu_agente_dados.main:app --host 0.0.0.0 --port 8000 &\n\
+sleep 3\n\
 python -m streamlit run utils/meu_agente_dados/app.py --server.port=8501 --server.address=0.0.0.0\n\
 ' > /app/start.sh && chmod +x /app/start.sh
 
-# Executa o script de inicialização dupla
 CMD ["/app/start.sh"]
