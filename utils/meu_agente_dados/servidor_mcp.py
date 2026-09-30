@@ -1,6 +1,15 @@
 import os
 import sys
 
+# Impede que logs e warnings de bibliotecas poluam a saída primária do protocolo MCP (stdout)
+warnings.filterwarnings("ignore")
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding='utf-8')
+    sys.stderr.reconfigure(encoding='utf-8')
+
+# Redireciona prints normais que ocorram durante a execução do servidor para o stderr
+sys.stdout = sys.stderr
+
 # Garante que a raiz do projeto (onde está a pasta 'core') seja encontrada pelo Python
 DIR_ATUAL = os.path.dirname(os.path.abspath(__file__))
 RAIZ_PROJETO = os.path.abspath(os.path.join(DIR_ATUAL, "../../"))

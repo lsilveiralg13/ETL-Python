@@ -109,7 +109,7 @@ async def processar_mcp_e_llm(prompt_usuario, historico_mensagens, dialeto_sql, 
     env_vars["PYTHONUNBUFFERED"] = "1"
     env_vars["PYTHONIOENCODING"] = "utf-8"
     env_vars["GEMINI_API_KEY"] = api_key
-    env_vars["PYTHONPATH"] = RAIZ_PROJETO
+    env_vars["PYTHONPATH"] = f"{DIR_ATUAL}:{RAIZ_PROJETO}"
 
     server_params = StdioServerParameters(
         command=sys.executable,
@@ -121,10 +121,10 @@ async def processar_mcp_e_llm(prompt_usuario, historico_mensagens, dialeto_sql, 
     conteudo_retorno = None
 
     try:
+        # Abre a conexão STDIO capturando e isolando o canal de erros
         async with stdio_client(server_params) as (read, write):
             async with ClientSession(read, write) as session:
                 await session.initialize()
-
                 mcp_tools = await session.list_tools()
 
                 function_declarations = []
