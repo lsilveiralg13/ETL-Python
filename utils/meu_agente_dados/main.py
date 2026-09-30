@@ -257,7 +257,7 @@ def health_check():
     return {"status": "online", "agente": "Vetra"}
 
 
-@app.post("/api/v1/chat")
+@app.post("/chat")
 async def chat_endpoint(payload: ChatRequest):
     try:
         historico_dict = [m.model_dump() for m in payload.historico]
