@@ -16,6 +16,7 @@ from google import genai
 from google.genai import types
 from dotenv import load_dotenv
 
+# Fix para o bug de conexões STDIO do MCP no Windows
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
@@ -266,6 +267,7 @@ def health_check():
 
 @app.post("/chat")
 def chat_endpoint(payload: ChatRequest):
+    """Endpoint síncrono padrão para garantir estabilidade máxima."""
     try:
         historico_dict = [m.model_dump() for m in payload.historico] if payload.historico else []
 
@@ -286,27 +288,44 @@ def chat_endpoint(payload: ChatRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @app.post("/chat/stream")
 async def chat_stream_endpoint(payload: ChatRequest):
-    """Endpoint SSE para transmitir o progresso e o resultado via streaming."""
-    def event_generator():
+    """Endpoint SSE assíncrono e não-bloqueante seguro para Windows/Linux/Fly.io."""
+    async def event_generator():
         try:
-            historico_dict = [m.model_dump() for m in payload.historico]
+            historico_dict = [m.model_dump() for m in payload.historico] if payload.historico else []
 
-            # Notifica que o processamento do MCP / Gemini começou
+            # Notifica que o processamento começou
             yield f"data: {json.dumps({'chunk': '⌛ *Consultando inteligência de dados e MCP...*\n\n'})}\n\n"
 
-            resposta, modelo_usado, mcp_chamado, retorno_mcp = rodar_em_thread_limpa(
+            # Executa a thread síncrona sem travar o EventLoop do asyncio
+            resposta, modelo_usado, mcp_chamado, retorno_mcp = await anyio.to_thread.run_sync(
+                rodar_em_thread_limpa,
                 payload.prompt,
                 historico_dict,
                 payload.dialeto_sql,
                 payload.temperatura
             )
 
-            # Envia o conteúdo final completo
-            yield f"data: {json.dumps({'resposta': resposta, 'modelo_usado': modelo_usado, 'mcp_chamado': mcp_chamado, 'dados_mcp_raw': retorno_mcp})}\n\n"
+            # Envia a estrutura final consolidada
+            payload_resposta = {
+                "resposta": resposta,
+                "modelo_usado": modelo_usado,
+                "mcp_chamado": mcp_chamado,
+                "dados_mcp_raw": retorno_mcp
+            }
+            yield f"data: {json.dumps(payload_resposta)}\n\n"
 
         except Exception as e:
             yield f"data: {json.dumps({'error': str(e)})}\n\n"
 
-    return StreamingResponse(event_generator(), media_type="text/event-stream")
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"
+        }
+    )
