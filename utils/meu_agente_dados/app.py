@@ -22,7 +22,7 @@ st.set_page_config(
 )
 
 # URL da API Backend (Pode ser ajustada para a URL do Fly.io ou localhost)
-API_URL = os.environ.get("VETRA_API_URL", "http://localhost:8000/api/v1/chat")
+API_URL = os.environ.get("VETRA_API_URL", "http://localhost:8000/chat")
 
 # Tabela de Preços Estimados (Gemini Flash Pay-as-you-go) por 1 Milhão de Tokens (USD)
 PRECO_INPUT_1M = 0.075   # $0,075 por 1M tokens de entrada
