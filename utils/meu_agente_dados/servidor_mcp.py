@@ -1,30 +1,27 @@
 import os
 import sys
+import json
+import time
+import re
+import warnings
+from typing import Optional, List, Dict, Any
+from functools import wraps
 
-# Impede que logs e warnings de bibliotecas poluam a saída primária do protocolo MCP (stdout)
+# Configurações de UTF-8 e supressão de warnings para o protocolo MCP
 warnings.filterwarnings("ignore")
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding='utf-8')
     sys.stderr.reconfigure(encoding='utf-8')
 
-# Redireciona prints normais que ocorram durante a execução do servidor para o stderr
-sys.stdout = sys.stderr
-
-# Garante que a raiz do projeto (onde está a pasta 'core') seja encontrada pelo Python
+# Garante que a raiz do projeto seja encontrada
 DIR_ATUAL = os.path.dirname(os.path.abspath(__file__))
 RAIZ_PROJETO = os.path.abspath(os.path.join(DIR_ATUAL, "../../"))
 if RAIZ_PROJETO not in sys.path:
     sys.path.insert(0, RAIZ_PROJETO)
 
-import json
-import time
-import re
-from typing import Optional, List, Dict, Any
-from functools import wraps
 from mcp.server.mcpserver import MCPServer
 from qdrant_client import QdrantClient
 
-# Importações dos módulos de segurança RAG
 from core.rag_guard import buscar_conhecimento_rag as rag_guard_buscar, PROMPT_SISTEMA_VETRA
 from core.api_client import requisicao_api_segura
 
@@ -33,7 +30,6 @@ import requests
 import pandas as pd
 import numpy as np
 
-# Importações para os Motores de Machine Learning e Estatística
 from sklearn.ensemble import IsolationForest, RandomForestRegressor
 from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import KMeans
@@ -64,17 +60,15 @@ def obter_cliente_qdrant():
                     vectors_config=qdrant_cliente.get_fastembed_vector_params()
                 )
         except Exception as e:
-            print(f"Erro ao conectar ao Qdrant: {e}", file=sys.stderr)
+            sys.stderr.write(f"Erro ao conectar ao Qdrant: {e}\n")
     return qdrant_cliente
 
 # -----------------------------------------------------------------------------
-# SANITIZAÇÃO E MASCARAMENTO PII (PROTEÇÃO DE DADOS SENSÍVEIS)
+# SANITIZAÇÃO E MASCARAMENTO PII
 # -----------------------------------------------------------------------------
 def mascarar_dados_sensiveis(texto: str) -> str:
-    """Aplica regex para ocultar CPFs, e-mails e telefones antes de trafegar ou salvar."""
     if not texto:
         return texto
-    
     texto = re.sub(r'\b\d{3}\.\d{3}\.\d{3}-\d{2}\b', '[CPF_OCULTO]', texto)
     texto = re.sub(r'\b\d{11}\b', '[CPF_OCULTO]', texto)
     texto = re.sub(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', '[EMAIL_OCULTO]', texto)
@@ -82,7 +76,7 @@ def mascarar_dados_sensiveis(texto: str) -> str:
     return texto
 
 # -----------------------------------------------------------------------------
-# DICIONÁRIO DE DADOS RICO E SCHEMA-AWARENESS
+# DICIONÁRIO DE DADOS
 # -----------------------------------------------------------------------------
 DICIONARIO_DADOS_DETALHADO = {
     "tb_producao": {
@@ -118,7 +112,7 @@ DICIONARIO_DADOS_DETALHADO = {
 }
 
 # -----------------------------------------------------------------------------
-# CACHE COM TTL (TIME TO LIVE)
+# CACHE COM TTL
 # -----------------------------------------------------------------------------
 CACHE_MEMORIA: Dict[str, Dict[str, Any]] = {}
 CACHE_TTL_SEGUNDOS = 300
@@ -133,7 +127,6 @@ def com_cache(ttl_segundos: int = CACHE_TTL_SEGUNDOS):
                 registro = CACHE_MEMORIA[chave_cache]
                 if agora - registro["timestamp"] < ttl_segundos:
                     return registro["dados"] + "\n\n⚡ *(Resposta obtida do cache)*"
-            
             resultado = func(*args, **kwargs)
             CACHE_MEMORIA[chave_cache] = {"timestamp": agora, "dados": resultado}
             return resultado
@@ -151,7 +144,7 @@ def dividir_em_chunks(texto: str, tamanho_chunk: int = 500, sobreposicao: int = 
     return chunks
 
 # -----------------------------------------------------------------------------
-# FERRAMENTAS MCP — RAG HÍBRIDO E DOCUMENTOS
+# FERRAMENTAS MCP
 # -----------------------------------------------------------------------------
 @mcp.tool()
 def indexar_documento_com_chunking(
@@ -205,8 +198,6 @@ def buscar_conhecimento_rag(
         return "⚠️ Qdrant Cloud não configurado."
 
     try:
-        resultados = None
-        # Injeção do filtro RBAC
         resultados = rag_guard_buscar(
             client=client,
             collection_name=NOME_COLECAO,
@@ -216,7 +207,6 @@ def buscar_conhecimento_rag(
             limit=limite
         )
 
-        # Fallback para métodos nativos originais caso o wrapper não retorne objeto esperado
         if resultados is None:
             if hasattr(client, "query_points"):
                 res_points = client.query_points(
@@ -227,12 +217,6 @@ def buscar_conhecimento_rag(
                 resultados = getattr(res_points, "points", res_points)
             elif hasattr(client, "search"):
                 resultados = client.search(
-                    collection_name=NOME_COLECAO,
-                    query_text=termo_busca,
-                    limit=limite
-                )
-            elif hasattr(client, "query"):
-                resultados = client.query(
                     collection_name=NOME_COLECAO,
                     query_text=termo_busca,
                     limit=limite
@@ -255,9 +239,6 @@ def buscar_conhecimento_rag(
     except Exception as e:
         return f"Erro na consulta RAG: {str(e)}"
 
-# -----------------------------------------------------------------------------
-# FERRAMENTAS SQL COM SCHEMA-AWARENESS
-# -----------------------------------------------------------------------------
 @mcp.tool()
 def validar_e_executar_sql(query: str, dialecto: str = "postgres") -> str:
     """Valida a sintaxe SQL via AST e checa a existência de tabelas e colunas."""
@@ -326,7 +307,7 @@ def descrever_estrutura_tabela(nome_tabela: str) -> str:
 @mcp.tool()
 @com_cache(ttl_segundos=180)
 def calcular_indicador_otif(unidade: Optional[str] = None) -> str:
-    """Calcula o indicador de performance logístico OTIF (On-Time In-Full) acumulado do período."""
+    """Calcula o indicador de performance logístico OTIF acumulado do período."""
     dados_otif = {
         "Contagem": {"total_pedidos": 450, "no_prazo": 420, "completos": 410, "otif_sucesso": 398},
         "Belo Horizonte": {"total_pedidos": 600, "no_prazo": 570, "completos": 550, "otif_sucesso": 530},
@@ -351,10 +332,9 @@ def calcular_indicador_otif(unidade: Optional[str] = None) -> str:
             "pedidos_otif_perfeito": d["otif_sucesso"]
         }
     }
-    return f"```json\n{json.dumps(resultado, ensure_ascii=False, indent=2)}\n```"
+    resultado_json = json.dumps(resultado, ensure_ascii=False, indent=2)
+    return f"```json\n{resultado_json}\n```"
 
-```python
-# CÓDIGO CORRIGIDO:
 @mcp.tool()
 @com_cache(ttl_segundos=180)
 def calcular_lead_time_producao(linha_produto: str = "Geral") -> str:
@@ -366,5 +346,93 @@ def calcular_lead_time_producao(linha_produto: str = "Geral") -> str:
         "eficiencia_geral_oee": "87.4%",
         "gargalo_identificado": "Etapa de Pintura / Carga Térmica"
     }
-    resultado = json.dumps(metricas, ensure_ascii=False, indent=2)
-    return f"```json\n{resultado}\n```"
+    resultado_json = json.dumps(metricas, ensure_ascii=False, indent=2)
+    return f"```json\n{resultado_json}\n```"
+
+@mcp.tool()
+@com_cache(ttl_segundos=600)
+def consultar_ibge_sidra(tabela: str = "1737", periodo: str = "last 6", variavel: str = "all") -> str:
+    """Consulta a API REST oficial do IBGE / SIDRA para obter IPCA, População ou PIB."""
+    try:
+        url = f"https://servicodados.ibge.gov.br/api/v3/agregados/{tabela}/periodos/{periodo}/variaveis/{variavel}?localidades=N1[all]"
+        headers = {"User-Agent": "VetraDataAgent/1.0"}
+        response = requests.get(url, headers=headers, timeout=15)
+        
+        if response.status_code != 200:
+            return f"Error: API IBGE/SIDRA retornou status {response.status_code}."
+            
+        dados = response.json()
+        if not dados:
+            return "Nenhum resultado retornado do IBGE."
+            
+        resultados = []
+        for item in dados:
+            var_nome = item.get("variavel", "Valor")
+            unidade = item.get("unidade", "")
+            for res in item.get("resultados", []):
+                for serie in res.get("series", []):
+                    localidade = serie.get("localidade", {}).get("nome", "Brasil")
+                    for data_p, valor in serie.get("serie", {}).items():
+                        resultados.append({
+                            "periodo": data_p,
+                            "indicador": f"{var_nome} ({unidade})",
+                            "localidade": localidade,
+                            "valor": float(valor) if valor not in [None, "...", "-"] else None
+                        })
+
+        df_res = pd.DataFrame(resultados)
+        retorno_json = {
+            "colunas": list(df_res.columns),
+            "linhas": df_res.values.tolist()
+        }
+        res_str = json.dumps(retorno_json, ensure_ascii=False, indent=2)
+        return f"```json\n{res_str}\n```"
+    except Exception as e:
+        return f"Erro ao consultar IBGE/SIDRA: {type(e).__name__} - {str(e)}"
+
+@mcp.tool()
+@com_cache(ttl_segundos=600)
+def buscar_dados_municipio_ibge(nome_municipio: str) -> str:
+    """Obtém código IBGE, UF e região via API de Localidades do IBGE."""
+    try:
+        url = f"https://servicodados.ibge.gov.br/api/v1/localidades/municipios/{nome_municipio}"
+        headers = {"User-Agent": "VetraDataAgent/1.0"}
+        response = requests.get(url, headers=headers, timeout=10)
+        
+        if response.status_code != 200 or not response.json():
+            return f"Município '{nome_municipio}' não encontrado."
+            
+        dados = response.json()
+        mun = dados[0] if isinstance(dados, list) and len(dados) > 0 else dados
+            
+        info = {
+            "id_ibge": mun.get("id"),
+            "municipio": mun.get("nome"),
+            "uf": mun.get("microrregiao", {}).get("mesorregiao", {}).get("UF", {}).get("sigla"),
+            "estado": mun.get("microrregiao", {}).get("mesorregiao", {}).get("UF", {}).get("nome"),
+            "regiao": mun.get("microrregiao", {}).get("mesorregiao", {}).get("UF", {}).get("regiao", {}).get("nome")
+        }
+        return json.dumps(info, ensure_ascii=False, indent=2)
+    except Exception as e:
+        return f"Erro na consulta de municípios: {str(e)}"
+
+@mcp.tool()
+@com_cache(ttl_segundos=300)
+def consultar_indicadores_bcb(codigo_serie: int = 432) -> str:
+    """Consulta séries temporais reais do Banco Central do Brasil (SGS)."""
+    try:
+        url = f"https://api.bcb.gov.br/dados/serie/bcdata.sgs.{codigo_serie}/dados/ultimos/12?formato=json"
+        response = requests.get(url, timeout=10)
+        if response.status_code != 200:
+            return f"Erro ao acessar Banco Central: Status {response.status_code}"
+            
+        dados = response.json()
+        df = pd.DataFrame(dados)
+        df["valor"] = pd.to_numeric(df["valor"], errors="coerce")
+        
+        retorno = {
+            "colunas": ["data", "valor"],
+            "linhas": df.values.tolist()
+        }
+        res_str = json.dumps(retorno, ensure_ascii=False, indent=2)
+        return f"```json\n{res_str}\n
