@@ -20,14 +20,14 @@ primary_region = "gru"
     hard_limit = 25
     soft_limit = 20
 
-# Health check explícito na rota nativa do Streamlit
+# Health check focado na porta do Streamlit
 [[services.checks]]
-  grace_period = "10s"
-  interval = "15s"
+  grace_period = "15s"
+  interval = "20s"
   method = "get"
   path = "/_stcore/health"
   port = 8501
-  timeout = "2s"
+  timeout = "3s"
   type = "http"
 
 [[vm]]
