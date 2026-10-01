@@ -183,10 +183,25 @@ def analisar_explain_plan_sql(sql_query: str) -> list[str]:
     return alertas_perf
 
 
+# =============================================================================
+# IMPORTAÇÃO DO ORQUESTRADOR NATIVO (FALLBACK IN-MEMORY)
+# =============================================================================
+try:
+    # Tenta importar o orquestrador do agente para fallback nativo na mesma memória
+    from utils.meu_agente_dados.main import processar_mcp_e_llm
+    import asyncio
+    HAS_LOCAL_ORCHESTRATOR = True
+except Exception:
+    HAS_LOCAL_ORCHESTRATOR = False
+
+
+# =============================================================================
+# FUNÇÃO DE COMUNICAÇÃO COM O BACKEND / AGENTE
+# =============================================================================
 def chamar_api_backend(prompt: str, historico: list, dialeto_sql: str, temperatura: float):
     """
-    Envia o payload e consome o backend de forma altamente resiliente.
-    Prioriza a rota SSE (/chat/stream) e faz fallback automático para (/chat).
+    Consome o backend FastAPI. Se houver falha de rede/HTTP no Fly.io ou Docker,
+    executa o orquestrador do agente nativamente na mesma memória como fallback!
     """
     historico_formatado = []
     for m in historico:
@@ -206,14 +221,14 @@ def chamar_api_backend(prompt: str, historico: list, dialeto_sql: str, temperatu
     url_stream = f"{API_BASE_URL}/chat/stream"
     url_sync = f"{API_BASE_URL}/chat"
 
-    # Tentativa 1: Rota com SSE (Streaming)
+    # TENTATIVA 1: Rota com SSE (Streaming via HTTP)
     try:
         response = requests.post(
             url_stream, 
             json=payload, 
             headers={"Content-Type": "application/json"},
             stream=True,
-            timeout=300
+            timeout=5
         )
         
         if response.status_code == 200:
@@ -242,15 +257,15 @@ def chamar_api_backend(prompt: str, historico: list, dialeto_sql: str, temperatu
                 return resposta_texto, modelo_usado, mcp_chamado, dados_mcp_raw
 
     except Exception:
-        pass  # Se falhar o streaming, tenta o fallback síncrono abaixo
+        pass  # Falha no streaming HTTP, tenta a rota síncrona ou fallback nativo abaixo
 
-    # Tentativa 2: Fallback para a Rota Síncrona Clássica
+    # TENTATIVA 2: Rota Síncrona Clássica via HTTP
     try:
         response = requests.post(
             url_sync, 
             json=payload, 
             headers={"Content-Type": "application/json"},
-            timeout=180
+            timeout=5
         )
         if response.status_code == 200:
             dados = response.json()
@@ -260,15 +275,20 @@ def chamar_api_backend(prompt: str, historico: list, dialeto_sql: str, temperatu
                 dados.get("mcp_chamado", False),
                 dados.get("dados_mcp_raw", None)
             )
-        else:
-            return f"❌ Erro na API Backend (Status {response.status_code}): {response.text}", None, False, None
+    except Exception:
+        pass  # Falha na chamada HTTP síncrona, migra para o Fallback Nativo
 
-    except requests.exceptions.ConnectionError:
-        return f"❌ Não foi possível conectar ao servidor backend da Vetra ({API_BASE_URL}). Certifique-se de que a API FastAPI está ativa.", None, False, None
-    except requests.exceptions.Timeout:
-        return "❌ Tempo limite excedido (Timeout) aguardando resposta do backend.", None, False, None
-    except Exception as e:
-        return f"❌ Erro ao comunicar com o Backend: {str(e)}", None, False, None
+    # TENTATIVA 3 (FALLBACK DEFINITIVO): Execução Nativa do Agente em Memória
+    if HAS_LOCAL_ORCHESTRATOR:
+        try:
+            resposta, modelo_usado, mcp_chamado, retorno_mcp = asyncio.run(
+                processar_mcp_e_llm(prompt, historico_formatado, dialeto_sql, temperatura)
+            )
+            return resposta, f"{modelo_usado} (Nativo)", mcp_chamado, retorno_mcp
+        except Exception as err:
+            return f"❌ Erro na execução nativa do agente: {str(err)}", None, False, None
+
+    return f"❌ Não foi possível conectar ao servidor backend da Vetra ({API_BASE_URL}).", None, False, None
 
 # =============================================================================
 # ESTILO — TEMA ESCURO HARMONIZADO
