@@ -16,11 +16,4 @@ COPY . .
 
 EXPOSE 8501 8000
 
-# Script de inicialização unificado
-RUN echo '#!/bin/sh\n\
-python -m uvicorn utils.meu_agente_dados.main:app --host 0.0.0.0 --port 8000 &\n\
-sleep 5\n\
-python -m streamlit run utils/meu_agente_dados/app.py --server.port=8501 --server.address=0.0.0.0\n\
-' > /app/start.sh && chmod +x /app/start.sh
-
-CMD ["/app/start.sh"]
+# Não precisa de ENTRYPOINT ou CMD com start.sh! O fly.toml assume o controle via [processes].
