@@ -188,7 +188,6 @@ def analisar_explain_plan_sql(sql_query: str) -> list[str]:
 # IMPORTAÇÃO DO ORQUESTRADOR NATIVO (FALLBACK IN-MEMORY)
 # =============================================================================
 try:
-    # Tenta importar o orquestrador do agente para fallback nativo na mesma memória
     from utils.meu_agente_dados.main import processar_mcp_e_llm
     import asyncio
     HAS_LOCAL_ORCHESTRATOR = True
@@ -204,8 +203,11 @@ def chamar_api_backend(prompt: str, historico: list, dialeto_sql: str, temperatu
     Consome o backend FastAPI. Se houver falha de rede/HTTP no Fly.io ou Docker,
     executa o orquestrador do agente nativamente na mesma memória como fallback!
     """
+    # BOA PRÁTICA 3: Otimização de contexto (envia os últimos 10 turnos para reduzir tokens e latência)
+    historico_recente = historico[-10:] if len(historico) > 10 else historico
+    
     historico_formatado = []
-    for m in historico:
+    for m in historico_recente:
         if isinstance(m, dict):
             historico_formatado.append({
                 "role": m.get("role", "user"),
@@ -229,7 +231,7 @@ def chamar_api_backend(prompt: str, historico: list, dialeto_sql: str, temperatu
             json=payload, 
             headers={"Content-Type": "application/json"},
             stream=True,
-            timeout=5
+            timeout=15
         )
         
         if response.status_code == 200:
@@ -258,7 +260,7 @@ def chamar_api_backend(prompt: str, historico: list, dialeto_sql: str, temperatu
                 return resposta_texto, modelo_usado, mcp_chamado, dados_mcp_raw
 
     except Exception:
-        pass  # Se falhar o streaming HTTP, tenta a rota síncrona ou o fallback nativo abaixo
+        pass
 
     # TENTATIVA 2: Rota Síncrona Clássica via HTTP
     try:
@@ -266,7 +268,7 @@ def chamar_api_backend(prompt: str, historico: list, dialeto_sql: str, temperatu
             url_sync, 
             json=payload, 
             headers={"Content-Type": "application/json"},
-            timeout=5
+            timeout=15
         )
         if response.status_code == 200:
             dados = response.json()
@@ -277,7 +279,7 @@ def chamar_api_backend(prompt: str, historico: list, dialeto_sql: str, temperatu
                 dados.get("dados_mcp_raw", None)
             )
     except Exception:
-        pass  # Falhas de conexão/HTTP passam direto para o Fallback Nativo In-Memory abaixo
+        pass
 
     # TENTATIVA 3 (FALLBACK DEFINITIVO): Execução Nativa do Agente em Memória
     if HAS_LOCAL_ORCHESTRATOR:
@@ -443,6 +445,20 @@ with st.sidebar:
 
     st.markdown('<div class="vt-sep"></div>', unsafe_allow_html=True)
 
+    # BOA PRÁTICA 1: Atalhos Rápidos para Prompts Frequentes
+    with st.expander("⚡ Prompts Rápidos", expanded=False):
+        if st.button("📊 Consultar OTIF Geral", use_container_width=True):
+            st.session_state.pending_prompt = "Calcular indicador OTIF acumulado da empresa"
+            st.rerun()
+        if st.button("🗄️ Detalhar tb_producao", use_container_width=True):
+            st.session_state.pending_prompt = "Descrever estrutura da tabela tb_producao"
+            st.rerun()
+        if st.button("💲 Cotação Moedas Hoje", use_container_width=True):
+            st.session_state.pending_prompt = "Consultar cotação do Dólar e Euro atual"
+            st.rerun()
+
+    st.markdown('<div class="vt-sep"></div>', unsafe_allow_html=True)
+
     # UPLOAD E INGESTÃO DE DOCUMENTOS
     st.markdown('<div class="vt-card-title">Ingestão RAG (Qdrant)</div>', unsafe_allow_html=True)
     arquivo_uploaded = st.file_uploader("Carregar PDF, TXT ou CSV", type=["pdf", "txt", "csv"])
@@ -598,114 +614,131 @@ if prompt:
     temp_atual = st.session_state.preferencias_usuario.get("temperatura", 0.2)
 
     with st.chat_message("assistant", avatar=AVATAR_MODELO):
-        with st.spinner("Enviando requisição à API Backend da Vetra..."):
+        # BOA PRÁTICA 2: Status Dinâmico e Informativo de Execução
+        with st.status("🔍 *Processando consulta com inteligência de dados...*", expanded=True) as status_box:
+            status_box.write("1. Conectando ao backend FastAPI e orquestrador MCP...")
+            
             resposta, modelo_usado, mcp_chamado, retorno_mcp = chamar_api_backend(
                 prompt, historico_copia, dialeto_atual, temp_atual
             )
-            st.markdown(resposta)
             
-            if "```sql" in resposta:
-                try:
-                    sql_code = resposta.split("```sql")[1].split("```")[0].strip()
-                    alertas_performance = analisar_explain_plan_sql(sql_code)
-                    if alertas_performance:
-                        for ap in alertas_performance:
-                            st.info(ap)
+            status_box.write("2. Sintetizando resposta final e validando regras...")
+            status_box.update(label="✅ *Processamento concluído com sucesso!*", state="complete", expanded=False)
 
-                    with st.expander("📋 Ver Query SQL em destaque para copiar/baixar"):
-                        st.code(sql_code, language="sql")
-                        st.download_button(
-                            label="💾 Baixar Query (.sql)",
-                            data=sql_code,
-                            file_name=f"query_vetra_{datetime.now().strftime('%H%M%S')}.sql",
-                            mime="text/plain",
-                            key=f"dl_sql_{len(st.session_state.messages)}"
+        st.markdown(resposta)
+        
+        if "```sql" in resposta:
+            try:
+                sql_code = resposta.split("```sql")[1].split("```")[0].strip()
+                alertas_performance = analisar_explain_plan_sql(sql_code)
+                if alertas_performance:
+                    for ap in alertas_performance:
+                        st.info(ap)
+
+                with st.expander("📋 Ver Query SQL em destaque para copiar/baixar"):
+                    st.code(sql_code, language="sql")
+                    st.download_button(
+                        label="💾 Baixar Query (.sql)",
+                        data=sql_code,
+                        file_name=f"query_vetra_{datetime.now().strftime('%H%M%S')}.sql",
+                        mime="text/plain",
+                        key=f"dl_sql_{len(st.session_state.messages)}"
+                    )
+            except Exception:
+                pass
+
+        if modelo_usado:
+            st.caption(f"Respondido por `{modelo_usado}` via FastAPI Backend · {datetime.now().strftime('%H:%M')}")
+
+        # RENDERIZAÇÃO VISUAL: TABELAS E MOTORES DE MACHINE LEARNING
+        if retorno_mcp:
+            json_str = retorno_mcp
+            if "```json" in retorno_mcp:
+                json_str = retorno_mcp.split("```json")[1].split("```")[0].strip()
+            elif "```" in retorno_mcp:
+                json_str = retorno_mcp.split("```")[1].split("```")[0].strip()
+
+            try:
+                dados = json.loads(json_str)
+
+                if isinstance(dados, dict) and dados.get("status") == "sucesso":
+                    st.markdown("---")
+                    st.markdown("#### 🤖 Painel de Inteligência de Machine Learning")
+
+                    if "previsoes" in dados and "historico_recente" in dados:
+                        df_hist = pd.DataFrame(dados["historico_recente"])
+                        df_pred = pd.DataFrame(dados["previsoes"])
+
+                        if "valor_historico" in df_hist.columns:
+                            df_hist = df_hist.rename(columns={"valor_historico": "Valor"})
+                            df_hist["Tipo"] = "Histórico"
+                        
+                        if "valor_previsto" in df_pred.columns:
+                            df_pred = df_pred.rename(columns={"valor_previsto": "Valor"})
+                            df_pred["Tipo"] = "Projeção ML"
+
+                        df_combinado = pd.concat([df_hist, df_pred], ignore_index=True)
+
+                        fig_forecast = px.line(
+                            df_combinado, x="data", y="Valor", color="Tipo",
+                            title="📈 Projeção Tendencial e Séries Temporais (Forecasting ML)",
+                            markers=True, color_discrete_map={"Histórico": "#45C4B0", "Projeção ML": "#E8A945"}
                         )
-                except Exception:
-                    pass
+                        st.plotly_chart(fig_forecast, use_container_width=True)
 
-            if modelo_usado:
-                st.caption(f"Respondido por `{modelo_usado}` via FastAPI Backend · {datetime.now().strftime('%H:%M')}")
+                    elif "total_anomalias_encontradas" in dados:
+                        c_kpi1, c_kpi2, c_kpi3 = st.columns(3)
+                        c_kpi1.metric("Linhas Analisadas", dados.get("total_linhas_analisadas", 0))
+                        c_kpi2.metric("Anomalias Detectadas", dados.get("total_anomalias_encontradas", 0))
+                        c_kpi3.metric("Taxa de Contaminação", f"{dados.get('percentual_anomalias', 0)}%")
 
-            # RENDERIZAÇÃO VISUAL: TABELAS E MOTORES DE MACHINE LEARNING
-            if retorno_mcp:
-                json_str = retorno_mcp
-                if "```json" in retorno_mcp:
-                    json_str = retorno_mcp.split("```json")[1].split("```")[0].strip()
-                elif "```" in retorno_mcp:
-                    json_str = retorno_mcp.split("```")[1].split("```")[0].strip()
+                        if "amostra_anomalias_detectadas" in dados and dados["amostra_anomalias_detectadas"]:
+                            df_anom = pd.DataFrame(dados["amostra_anomalias_detectadas"])
+                            st.dataframe(df_anom, use_container_width=True)
 
-                try:
-                    dados = json.loads(json_str)
+                elif isinstance(dados, dict) and "linhas" in dados and "colunas" in dados:
+                    df_bruto = pd.DataFrame(dados["linhas"], columns=dados["colunas"])
+                    
+                    alertas_qualidade = executar_sanity_check_df(df_bruto)
+                    if alertas_qualidade:
+                        with st.expander("🛡️ Relatório de Qualidade de Dados (Sanity Check)", expanded=True):
+                            for al in alertas_qualidade:
+                                st.warning(al)
 
-                    if isinstance(dados, dict) and dados.get("status") == "sucesso":
-                        st.markdown("---")
-                        st.markdown("#### 🤖 Painel de Inteligência de Machine Learning")
+                    if st.session_state.preferencias_usuario.get("mascarar_pii", True):
+                        df_exibicao, cols_mascaradas = aplicar_mascaramento_pii(df_bruto)
+                        if cols_mascaradas:
+                            st.caption(f"🔒 **LGPD / PII Masking Ativo**: Colunas mascaradas: {', '.join(cols_mascaradas)}")
+                    else:
+                        df_exibicao = df_bruto
 
-                        if "previsoes" in dados and "historico_recente" in dados:
-                            df_hist = pd.DataFrame(dados["historico_recente"])
-                            df_pred = pd.DataFrame(dados["previsoes"])
-
-                            if "valor_historico" in df_hist.columns:
-                                df_hist = df_hist.rename(columns={"valor_historico": "Valor"})
-                                df_hist["Tipo"] = "Histórico"
-                            
-                            if "valor_previsto" in df_pred.columns:
-                                df_pred = df_pred.rename(columns={"valor_previsto": "Valor"})
-                                df_pred["Tipo"] = "Projeção ML"
-
-                            df_combinado = pd.concat([df_hist, df_pred], ignore_index=True)
-
-                            fig_forecast = px.line(
-                                df_combinado, x="data", y="Valor", color="Tipo",
-                                title="📈 Projeção Tendencial e Séries Temporais (Forecasting ML)",
-                                markers=True, color_discrete_map={"Histórico": "#45C4B0", "Projeção ML": "#E8A945"}
-                            )
-                            st.plotly_chart(fig_forecast, use_container_width=True)
-
-                        elif "total_anomalias_encontradas" in dados:
-                            c_kpi1, c_kpi2, c_kpi3 = st.columns(3)
-                            c_kpi1.metric("Linhas Analisadas", dados.get("total_linhas_analisadas", 0))
-                            c_kpi2.metric("Anomalias Detectadas", dados.get("total_anomalias_encontradas", 0))
-                            c_kpi3.metric("Taxa de Contaminação", f"{dados.get('percentual_anomalias', 0)}%")
-
-                            if "amostra_anomalias_detectadas" in dados and dados["amostra_anomalias_detectadas"]:
-                                df_anom = pd.DataFrame(dados["amostra_anomalias_detectadas"])
-                                st.dataframe(df_anom, use_container_width=True)
-
-                    elif isinstance(dados, dict) and "linhas" in dados and "colunas" in dados:
-                        df_bruto = pd.DataFrame(dados["linhas"], columns=dados["colunas"])
+                    st.markdown("---")
+                    st.markdown("#### 📊 Painel de Análise e Visualização de Dados")
+                    
+                    col_df, col_chart = st.columns([1, 1])
+                    with col_df:
+                        st.dataframe(df_exibicao, use_container_width=True)
                         
-                        alertas_qualidade = executar_sanity_check_df(df_bruto)
-                        if alertas_qualidade:
-                            with st.expander("🛡️ Relatório de Qualidade de Dados (Sanity Check)", expanded=True):
-                                for al in alertas_qualidade:
-                                    st.warning(al)
+                        # BOA PRÁTICA 4: Download direto dos dados em CSV
+                        csv_dados = df_exibicao.to_csv(index=False).encode('utf-8')
+                        st.download_button(
+                            label="📥 Baixar Dados da Tabela (.csv)",
+                            data=csv_dados,
+                            file_name=f"dados_vetra_{datetime.now().strftime('%H%M%S')}.csv",
+                            mime="text/csv",
+                            key=f"dl_csv_{len(st.session_state.messages)}"
+                        )
 
-                        if st.session_state.preferencias_usuario.get("mascarar_pii", True):
-                            df_exibicao, cols_mascaradas = aplicar_mascaramento_pii(df_bruto)
-                            if cols_mascaradas:
-                                st.caption(f"🔒 **LGPD / PII Masking Ativo**: Colunas mascaradas: {', '.join(cols_mascaradas)}")
-                        else:
-                            df_exibicao = df_bruto
+                    with col_chart:
+                        if not df_exibicao.empty and len(df_exibicao.columns) >= 2:
+                            idx_msg = len(st.session_state.messages)
+                            col_x = st.selectbox("Eixo X", df_exibicao.columns, index=0, key=f"chart_x_{idx_msg}")
+                            col_y = st.selectbox("Eixo Y", df_exibicao.columns, index=min(1, len(df_exibicao.columns)-1), key=f"chart_y_{idx_msg}")
+                            fig = px.bar(df_exibicao, x=col_x, y=col_y, title=f"{col_y} por {col_x}")
+                            st.plotly_chart(fig, use_container_width=True)
 
-                        st.markdown("---")
-                        st.markdown("#### 📊 Painel de Análise e Visualização de Dados")
-                        
-                        col_df, col_chart = st.columns([1, 1])
-                        with col_df:
-                            st.dataframe(df_exibicao, use_container_width=True)
-
-                        with col_chart:
-                            if not df_exibicao.empty and len(df_exibicao.columns) >= 2:
-                                idx_msg = len(st.session_state.messages)
-                                col_x = st.selectbox("Eixo X", df_exibicao.columns, index=0, key=f"chart_x_{idx_msg}")
-                                col_y = st.selectbox("Eixo Y", df_exibicao.columns, index=min(1, len(df_exibicao.columns)-1), key=f"chart_y_{idx_msg}")
-                                fig = px.bar(df_exibicao, x=col_x, y=col_y, title=f"{col_y} por {col_x}")
-                                st.plotly_chart(fig, use_container_width=True)
-
-                except Exception as e:
-                    st.warning(f"Não foi possível renderizar a visualização tabular/gráfica: {e}")
+            except Exception as e:
+                st.warning(f"Não foi possível renderizar a visualização tabular/gráfica: {e}")
 
     if mcp_chamado:
         st.session_state.total_chamadas_mcp += 1
