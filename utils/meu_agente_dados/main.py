@@ -305,7 +305,8 @@ async def chat_stream_endpoint(payload: ChatRequest):
             historico_dict = [m.model_dump() for m in payload.historico] if payload.historico else []
 
             # Notifica que o processamento começou
-            yield f"data: {json.dumps({'chunk': '⌛ *Consultando inteligência de dados e MCP...*\n\n'})}\n\n"
+            msg_chunk = json.dumps({'chunk': '⌛ *Consultando inteligência de dados e MCP...\n\n'}) 
+            yield f"data: {msg_chunk}\n\n"
 
             # Executa a thread síncrona sem travar o EventLoop do asyncio
             resposta, modelo_usado, mcp_chamado, retorno_mcp = await anyio.to_thread.run_sync(
