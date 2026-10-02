@@ -161,7 +161,7 @@ def executar_sanity_check_df(df: pd.DataFrame) -> list[str]:
         if any(kw in col_lower for kw in ['otif', 'qtd', 'quantidade', 'valor', 'total', 'lead_time', 'preco']):
             negativos = (df[col] < 0).sum()
             if negativos > 0:
-                alertas.append(f"⚠️ **Inconsistência Numérica**: `{col}` possui {negativos} valores negativos inesperados.")
+                alertas.append(f"⚠️️ **Inconsistência Numérica**: `{col}` possui {negativos} valores negativos inesperados.")
                 
     return alertas
 
@@ -198,7 +198,7 @@ except Exception:
 # =============================================================================
 # FUNÇÃO DE COMUNICAÇÃO COM O BACKEND / AGENTE
 # =============================================================================
-def chamar_api_backend(prompt: str, historico: list, dialeto_sql: str, temperatura: float):
+def chamar_api_backend(prompt: str, historico: list, dialeto_sql: str, temperatura: float, anexos: list = None):
     """
     Consome o backend FastAPI. Se houver falha de rede/HTTP no Fly.io ou Docker,
     executa o orquestrador do agente nativamente na mesma memória como fallback!
@@ -217,6 +217,7 @@ def chamar_api_backend(prompt: str, historico: list, dialeto_sql: str, temperatu
     payload = {
         "prompt": prompt,
         "historico": historico_formatado,
+        "anexos": anexos or [],
         "dialeto_sql": dialeto_sql,
         "temperatura": temperatura
     }
@@ -285,7 +286,7 @@ def chamar_api_backend(prompt: str, historico: list, dialeto_sql: str, temperatu
     if HAS_LOCAL_ORCHESTRATOR:
         try:
             resposta, modelo_usado, mcp_chamado, retorno_mcp = asyncio.run(
-                processar_mcp_e_llm(prompt, historico_formatado, dialeto_sql, temperatura)
+                processar_mcp_e_llm(prompt, historico_formatado, dialeto_sql, temperatura, anexos)
             )
             return resposta, f"{modelo_usado} (In-Memory)", mcp_chamado, retorno_mcp
         except Exception as err:
@@ -596,18 +597,40 @@ for message in st.session_state.messages:
         st.markdown(message["content"])
 
 # =============================================================================
-# ENTRADA DO USUÁRIO & PROCESSAMENTO
+# ENTRADA DO USUÁRIO & PROCESSAMENTO (MULTIMODAL / ANEXOS ATIVADOS)
 # =============================================================================
-prompt = st.chat_input("Digite sua pergunta sobre os dados ou solicite um SQL...")
+arquivos_anexados = st.file_uploader(
+    "📎 Anexar imagens (PNG, JPG) ou arquivos (PDF, TXT, CSV)", 
+    type=["png", "jpg", "jpeg", "pdf", "txt", "csv"],
+    accept_multiple_files=True,
+    key=f"uploader_{len(st.session_state.messages)}"
+)
+
+prompt = st.chat_input("Digite sua pergunta sobre os dados, envie um print ou solicite um SQL...")
 
 if st.session_state.pending_prompt and not prompt:
     prompt = st.session_state.pending_prompt
     st.session_state.pending_prompt = None
 
-if prompt:
-    st.session_state.messages.append({"role": "user", "content": prompt})
+if prompt or arquivos_anexados:
+    prompt_texto = prompt if prompt else "Analise o(s) arquivo(s) em anexo."
+    
+    # Prepara os anexos para envio em hexadecimal de forma totalmente transparente
+    anexos_payload = []
+    if arquivos_anexados:
+        for arq in arquivos_anexados:
+            bytes_arq = arq.read()
+            anexos_payload.append({
+                "nome": arq.name,
+                "mime_type": arq.type,
+                "conteudo_b64": bytes_arq.hex()
+            })
+        nomes_anexos = ", ".join([a.name for a in arquivos_anexados])
+        prompt_texto += f"\n\n📎 *Anexo(s): {nomes_anexos}*"
+
+    st.session_state.messages.append({"role": "user", "content": prompt_texto})
     with st.chat_message("user", avatar=AVATAR_USUARIO):
-        st.markdown(prompt)
+        st.markdown(prompt_texto)
 
     historico_copia = list(st.session_state.messages)
     dialeto_atual = st.session_state.preferencias_usuario.get("dialeto_sql", "PostgreSQL")
@@ -619,7 +642,7 @@ if prompt:
             status_box.write("1. Conectando ao backend FastAPI e orquestrador MCP...")
             
             resposta, modelo_usado, mcp_chamado, retorno_mcp = chamar_api_backend(
-                prompt, historico_copia, dialeto_atual, temp_atual
+                prompt_texto, historico_copia, dialeto_atual, temp_atual, anexos_payload
             )
             
             status_box.write("2. Sintetizando resposta final e validando regras...")

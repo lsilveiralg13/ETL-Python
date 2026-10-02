@@ -50,6 +50,11 @@ app = FastAPI(
     description="API do backend orquestradora de LLM e MCP para a Vetra"
 )
 
+class Anexo(BaseModel):
+    nome: str
+    mime_type: str
+    conteudo_b64: str
+
 class Mensagem(BaseModel):
     role: str
     content: str
@@ -57,6 +62,7 @@ class Mensagem(BaseModel):
 class ChatRequest(BaseModel):
     prompt: str
     historico: Optional[List[Mensagem]] = []
+    anexos: Optional[List[Anexo]] = []
     dialeto_sql: Optional[str] = "PostgreSQL"
     temperatura: Optional[float] = 0.2
 
@@ -97,7 +103,7 @@ def extrair_texto_da_resposta(response):
     return "\n".join(resultado_limpo).strip()
 
 
-async def processar_mcp_e_llm(prompt_usuario, historico_mensagens, dialeto_sql, temperatura=0.2):
+async def processar_mcp_e_llm(prompt_usuario, historico_mensagens, dialeto_sql, temperatura=0.2, anexos=None):
     api_key_raw = os.environ.get("GEMINI_API_KEY", "")
     api_key = str(api_key_raw).replace('"', '').replace("'", "").replace('\n', '').replace('\r', '').strip()
 
@@ -151,7 +157,7 @@ async def processar_mcp_e_llm(prompt_usuario, historico_mensagens, dialeto_sql, 
 
                 system_instruction = f"""
                 Você é o Vetra, um especialista consultivo avançado em engenharia de dados, BI, RAG e SQL.
-                Sua função é ajudar o usuário a entender seus esquemas, criar queries eficientes e analisar indicadores.
+                Sua função é ajudar o usuário a entender seus esquemas, criar queries eficientes, analisar imagens/anexos e indicadores.
                 O dialeto SQL preferido do usuário é: {dialeto_sql}.
                 """
 
@@ -167,11 +173,34 @@ async def processar_mcp_e_llm(prompt_usuario, historico_mensagens, dialeto_sql, 
                         )
                     )
 
-                if not contents or contents[-1].role != "user" or contents[-1].parts[0].text != prompt_usuario:
+                # Monta as partes da mensagem atual (incluindo imagens/arquivos se houver)
+                partes_mensagem_atual = []
+
+                if anexos:
+                    for a in anexos:
+                        try:
+                            # Trata dict ou BaseModel do Pydantic
+                            a_dict = a.model_dump() if hasattr(a, "model_dump") else a
+                            conteudo_hex = a_dict.get("conteudo_b64", "")
+                            mime_type = a_dict.get("mime_type", "image/png")
+                            if conteudo_hex:
+                                bytes_arq = bytes.fromhex(conteudo_hex)
+                                partes_mensagem_atual.append(
+                                    types.Part.from_bytes(
+                                        data=bytes_arq,
+                                        mime_type=mime_type
+                                    )
+                                )
+                        except Exception:
+                            pass
+
+                partes_mensagem_atual.append(types.Part.from_text(text=prompt_usuario))
+
+                if not contents or contents[-1].role != "user":
                     contents.append(
                         types.Content(
                             role="user",
-                            parts=[types.Part.from_text(text=prompt_usuario)]
+                            parts=partes_mensagem_atual
                         )
                     )
 
@@ -258,9 +287,9 @@ async def processar_mcp_e_llm(prompt_usuario, historico_mensagens, dialeto_sql, 
                f"Processando resposta diretamente via Gemini...", None, False, None
 
 
-def rodar_em_thread_limpa(prompt, historico, dialeto_sql, temperatura):
+def rodar_em_thread_limpa(prompt, historico, dialeto_sql, temperatura, anexos=None):
     try:
-        return asyncio.run(processar_mcp_e_llm(prompt, historico, dialeto_sql, temperatura))
+        return asyncio.run(processar_mcp_e_llm(prompt, historico, dialeto_sql, temperatura, anexos))
     except Exception as e:
         return f"❌ Erro ao executar assincronamente: {str(e)}", None, False, None
 
@@ -278,12 +307,14 @@ def chat_endpoint(payload: ChatRequest):
     """Endpoint síncrono padrão para garantir estabilidade máxima."""
     try:
         historico_dict = [m.model_dump() for m in payload.historico] if payload.historico else []
+        anexos_dict = [a.model_dump() for a in payload.anexos] if payload.anexos else []
 
         resposta, modelo_usado, mcp_chamado, retorno_mcp = rodar_em_thread_limpa(
             payload.prompt,
             historico_dict,
             payload.dialeto_sql,
-            payload.temperatura
+            payload.temperatura,
+            anexos_dict
         )
 
         return {
@@ -303,6 +334,7 @@ async def chat_stream_endpoint(payload: ChatRequest):
     async def event_generator():
         try:
             historico_dict = [m.model_dump() for m in payload.historico] if payload.historico else []
+            anexos_dict = [a.model_dump() for a in payload.anexos] if payload.anexos else []
 
             # Notifica que o processamento começou
             msg_chunk = json.dumps({'chunk': '⌛ *Consultando inteligência de dados e MCP...\n\n'}) 
@@ -314,7 +346,8 @@ async def chat_stream_endpoint(payload: ChatRequest):
                 payload.prompt,
                 historico_dict,
                 payload.dialeto_sql,
-                payload.temperatura
+                payload.temperatura,
+                anexos_dict
             )
 
             # Envia a estrutura final consolidada
