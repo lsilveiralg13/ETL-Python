@@ -173,16 +173,22 @@ async def processar_mcp_e_llm(prompt_usuario, historico_mensagens, dialeto_sql, 
                         )
                     )
 
-                # Monta as partes da mensagem atual (incluindo imagens/arquivos se houver)
+                # Monta as partes da mensagem atual garantindo tratamento seguro de anexos e texto
                 partes_mensagem_atual = []
 
                 if anexos:
                     for a in anexos:
                         try:
-                            # Trata dict ou BaseModel do Pydantic
                             a_dict = a.model_dump() if hasattr(a, "model_dump") else a
                             conteudo_hex = a_dict.get("conteudo_b64", "")
                             mime_type = a_dict.get("mime_type", "image/png")
+                            
+                            # Ajuste de MimeTypes padrão aceitos pelo Gemini API
+                            if "pdf" in mime_type:
+                                mime_type = "application/pdf"
+                            elif "csv" in mime_type or "txt" in mime_type:
+                                mime_type = "text/plain"
+                                
                             if conteudo_hex:
                                 bytes_arq = bytes.fromhex(conteudo_hex)
                                 partes_mensagem_atual.append(
@@ -194,7 +200,11 @@ async def processar_mcp_e_llm(prompt_usuario, historico_mensagens, dialeto_sql, 
                         except Exception:
                             pass
 
-                partes_mensagem_atual.append(types.Part.from_text(text=prompt_usuario))
+                if prompt_usuario:
+                    partes_mensagem_atual.append(types.Part.from_text(text=str(prompt_usuario)))
+
+                if not partes_mensagem_atual:
+                    partes_mensagem_atual = [types.Part.from_text(text="Análise de dados.")]
 
                 if not contents or contents[-1].role != "user":
                     contents.append(
