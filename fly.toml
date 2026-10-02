@@ -8,12 +8,12 @@ primary_region = "gru"
   PYTHONUNBUFFERED = "1"
   VETRA_API_URL = "http://backend.process.vetra-data-agent.internal:8000"
 
-# Declaração dos dois processos isolados
+# Declaração dos dois processos isolados em VMs separadas no Fly.io
 [processes]
   backend = "python -m uvicorn utils.meu_agente_dados.main:app --host 0.0.0.0 --port 8000"
   frontend = "python -m streamlit run utils/meu_agente_dados/app.py --server.port 8501 --server.address 0.0.0.0"
 
-# Rota pública (Streamlit na porta 8501)
+# Rota pública exposta na internet (aponta exclusivamente para o Streamlit na porta 8501)
 [http_service]
   processes = ["frontend"]
   internal_port = 8501
@@ -26,16 +26,6 @@ primary_region = "gru"
     type = "requests"
     hard_limit = 25
     soft_limit = 20
-
-# Health check ajustado para o processo backend
-[[checks]]
-  name = "backend_health"
-  processes = ["backend"]
-  type = "http"
-  port = 8000
-  path = "/health"
-  interval = "15s"
-  timeout = "5s"
 
 [[vm]]
   cpu_kind = "shared"

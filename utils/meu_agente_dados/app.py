@@ -258,7 +258,7 @@ def chamar_api_backend(prompt: str, historico: list, dialeto_sql: str, temperatu
                 return resposta_texto, modelo_usado, mcp_chamado, dados_mcp_raw
 
     except Exception:
-        pass  # Falha no streaming HTTP, tenta a rota síncrona ou fallback nativo abaixo
+        pass  # Se falhar o streaming HTTP, tenta a rota síncrona ou o fallback nativo abaixo
 
     # TENTATIVA 2: Rota Síncrona Clássica via HTTP
     try:
@@ -277,7 +277,7 @@ def chamar_api_backend(prompt: str, historico: list, dialeto_sql: str, temperatu
                 dados.get("dados_mcp_raw", None)
             )
     except Exception:
-        pass  # Falha na chamada HTTP síncrona, migra para o Fallback Nativo
+        pass  # Falhas de conexão/HTTP passam direto para o Fallback Nativo In-Memory abaixo
 
     # TENTATIVA 3 (FALLBACK DEFINITIVO): Execução Nativa do Agente em Memória
     if HAS_LOCAL_ORCHESTRATOR:
@@ -285,7 +285,7 @@ def chamar_api_backend(prompt: str, historico: list, dialeto_sql: str, temperatu
             resposta, modelo_usado, mcp_chamado, retorno_mcp = asyncio.run(
                 processar_mcp_e_llm(prompt, historico_formatado, dialeto_sql, temperatura)
             )
-            return resposta, f"{modelo_usado} (Nativo)", mcp_chamado, retorno_mcp
+            return resposta, f"{modelo_usado} (In-Memory)", mcp_chamado, retorno_mcp
         except Exception as err:
             return f"❌ Erro na execução nativa do agente: {str(err)}", None, False, None
 
