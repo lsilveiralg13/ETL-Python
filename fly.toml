@@ -6,16 +6,14 @@ primary_region = "gru"
 
 [env]
   PYTHONUNBUFFERED = "1"
-  # CORREÇÃO 1: Usa o DNS interno privado do Fly.io para conectar os dois processos
-  # Formato: http://<processo_backend>.process.<nome_do_app>.internal:8000
   VETRA_API_URL = "http://backend.process.vetra-data-agent.internal:8000"
 
-# Declaração dos processos isolados gerenciados pela Fly.io
+# Declaração dos dois processos isolados
 [processes]
   backend = "python -m uvicorn utils.meu_agente_dados.main:app --host 0.0.0.0 --port 8000"
   frontend = "python -m streamlit run utils/meu_agente_dados/app.py --server.port 8501 --server.address 0.0.0.0"
 
-# Rota pública exposta na web (aponta exclusivamente para o Frontend)
+# Rota pública (Streamlit na porta 8501)
 [http_service]
   processes = ["frontend"]
   internal_port = 8501
@@ -29,8 +27,9 @@ primary_region = "gru"
     hard_limit = 25
     soft_limit = 20
 
-# CORREÇÃO 2: Healthcheck isolado por processo para o Fly não derrubar o backend à toa
+# Health check ajustado para o processo backend
 [[checks]]
+  name = "backend_health"
   processes = ["backend"]
   type = "http"
   port = 8000
