@@ -1,15 +1,13 @@
-import os
-import sys
 import json
-import io
+import os
 import re
 from datetime import datetime
 
-import streamlit as st
 import pandas as pd
 import plotly.express as px
-from pypdf import PdfReader
 import requests
+import streamlit as st
+from pypdf import PdfReader
 
 # =============================================================================
 # CONFIGURAÇÃO DA PÁGINA

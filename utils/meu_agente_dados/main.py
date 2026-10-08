@@ -1,20 +1,18 @@
+import asyncio
+import json
 import os
 import sys
-import json
-import asyncio
-import concurrent.futures
 from typing import List, Optional
 
+import anyio
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
-import anyio
-
-from mcp import ClientSession, StdioServerParameters
-from mcp.client.stdio import stdio_client
 from google import genai
 from google.genai import types
-from dotenv import load_dotenv
+from mcp import ClientSession, StdioServerParameters
+from mcp.client.stdio import stdio_client
+from pydantic import BaseModel
 
 # Fix para o bug de conexões STDIO do MCP no Windows
 if sys.platform == "win32":

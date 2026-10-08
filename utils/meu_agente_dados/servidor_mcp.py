@@ -1,11 +1,11 @@
-import os
-import sys
 import json
-import time
+import os
 import re
+import sys
+import time
 import warnings
-from typing import Optional, List, Dict, Any
 from functools import wraps
+from typing import Optional, List, Dict, Any
 
 # Configurações de UTF-8 e supressão de warnings para o protocolo MCP
 warnings.filterwarnings("ignore")
@@ -23,12 +23,10 @@ from mcp.server.mcpserver import MCPServer
 from qdrant_client import QdrantClient
 
 from core.rag_guard import buscar_conhecimento_rag as rag_guard_buscar, PROMPT_SISTEMA_VETRA
-from core.api_client import requisicao_api_segura
 
 import sqlglot
 import requests
 import pandas as pd
-import numpy as np
 
 from sklearn.ensemble import IsolationForest, RandomForestRegressor
 from sklearn.preprocessing import StandardScaler
