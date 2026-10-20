@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import binascii
+import inspect
 import json
 import logging
 import os
@@ -630,11 +631,15 @@ async def gerar_conteudo_streaming(
     chamadas_por_ordem: list[str] = []
     conteudo_modelo: Any = None
 
-    async for chunk in client.aio.models.generate_content_stream(
+    stream = client.aio.models.generate_content_stream(
         model=modelo,
         contents=contents,
         config=config,
-    ):
+    )
+    if inspect.isawaitable(stream):
+        stream = await stream
+
+    async for chunk in stream:
         for candidato in getattr(chunk, "candidates", None) or []:
             conteudo = getattr(candidato, "content", None)
             if conteudo is None:

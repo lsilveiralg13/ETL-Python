@@ -273,6 +273,37 @@ class AgentRuntimeTests(unittest.TestCase):
         )
         self.assertEqual("".join(e["text"] for e in eventos), resposta.text)
 
+    def test_streaming_aguarda_sdk_que_retorna_coroutine_do_stream(self):
+        class FakeModels:
+            async def generate_content_stream(self, **_kwargs):
+                async def chunks():
+                    yield SimpleNamespace(
+                        candidates=[
+                            SimpleNamespace(
+                                content=main.types.Content(
+                                    role="model",
+                                    parts=[
+                                        main.types.Part.from_text(
+                                            text="Stream aguardado corretamente."
+                                        )
+                                    ],
+                                )
+                            )
+                        ]
+                    )
+
+                return chunks()
+
+        resposta = asyncio.run(
+            main.gerar_conteudo_streaming(
+                SimpleNamespace(aio=SimpleNamespace(models=FakeModels())),
+                "modelo-teste",
+                [],
+                None,
+            )
+        )
+        self.assertEqual(resposta.text, "Stream aguardado corretamente.")
+
     def test_fallback_tenta_proximo_modelo_apos_erro_no_stream(self):
         class FakeModels:
             async def generate_content_stream(self, *, model, **_kwargs):
