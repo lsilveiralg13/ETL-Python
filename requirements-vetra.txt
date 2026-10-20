@@ -6,6 +6,7 @@ google-genai
 groq
 openai
 qdrant-client
+fastembed
 sqlglot
 requests
 pandas
@@ -14,9 +15,17 @@ scikit-learn
 statsmodels
 scipy
 pypdf
+pypdfium2
+pytesseract
+Pillow
+python-pptx
+pyarrow
+defusedxml
 anyio
 plotly
 openpyxl
 fastapi
 fastapi-cli
+uvicorn
 sse-starlette
+python-dotenv

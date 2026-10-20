@@ -39,12 +39,14 @@ def buscar_conhecimento_rag(
     )
 
     try:
-        return client.search(
+        resultado = client.query_points(
             collection_name=collection_name,
-            query_vector=query_vector,
+            query=query_vector,
             query_filter=filtro_seguranca,
-            limit=limit
+            limit=limit,
+            with_payload=True,
         )
+        return resultado.points
     except Exception as e:
         logger.error(f"Erro ao buscar no Qdrant com RBAC: {e}")
         return None

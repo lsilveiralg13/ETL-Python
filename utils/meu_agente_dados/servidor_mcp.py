@@ -4,12 +4,13 @@ import os
 import re
 import sys
 import time
-import warnings
+import uuid
+from collections import OrderedDict
 from functools import wraps
+from threading import RLock, local
 from typing import Optional, List, Dict, Any
 
-# Configurações de UTF-8 e supressão de warnings para o protocolo MCP
-warnings.filterwarnings("ignore")
+# Mantém o protocolo MCP em UTF-8; os warnings seguem disponíveis no stderr.
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
     sys.stderr.reconfigure(encoding="utf-8")
@@ -21,23 +22,11 @@ if RAIZ_PROJETO not in sys.path:
     sys.path.insert(0, RAIZ_PROJETO)
 
 from mcp.server.mcpserver import MCPServer
-from qdrant_client import QdrantClient
-
-from core.rag_guard import (
-    buscar_conhecimento_rag as rag_guard_buscar,
-    PROMPT_SISTEMA_VETRA,
-)
 
 import sqlglot
 import requests
-import pandas as pd
-
-from sklearn.ensemble import IsolationForest, RandomForestRegressor
-from sklearn.preprocessing import StandardScaler
-from sklearn.cluster import KMeans
-from sklearn.impute import SimpleImputer
-from statsmodels.tsa.api import ExponentialSmoothing, SimpleExpSmoothing
-from scipy import stats
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 mcp = MCPServer("AgenteConsultivoDados")
 
@@ -47,8 +36,43 @@ mcp = MCPServer("AgenteConsultivoDados")
 QDRANT_URL = os.environ.get("QDRANT_URL")
 QDRANT_API_KEY = os.environ.get("QDRANT_API_KEY")
 NOME_COLECAO = "conhecimento_corporativo"
+NOME_MODELO_EMBEDDING = "BAAI/bge-small-en-v1.5"
+DIMENSAO_EMBEDDING = 384
+MAX_DOCUMENTO_CHARS = int(os.environ.get("VETRA_MAX_RAG_DOCUMENT_CHARS", "200000"))
+RAG_DEPARTAMENTO_PADRAO = os.environ.get("VETRA_RAG_DEPARTMENT", "TI").strip()
+RAG_NIVEL_ACESSO_PADRAO = int(os.environ.get("VETRA_RAG_ACCESS_LEVEL", "1"))
+if not RAG_DEPARTAMENTO_PADRAO:
+    raise ValueError("VETRA_RAG_DEPARTMENT não pode ser vazio.")
+if RAG_NIVEL_ACESSO_PADRAO < 0:
+    raise ValueError("VETRA_RAG_ACCESS_LEVEL não pode ser negativo.")
+if MAX_DOCUMENTO_CHARS < 1:
+    raise ValueError("VETRA_MAX_RAG_DOCUMENT_CHARS deve ser maior que zero.")
 
 qdrant_cliente = None
+modelo_embedding = None
+_QDRANT_LOCK = RLock()
+_HTTP_LOCAL = local()
+
+
+def obter_sessao_http() -> requests.Session:
+    sessao = getattr(_HTTP_LOCAL, "session", None)
+    if sessao is None:
+        politica_retentativa = Retry(
+            total=2,
+            connect=2,
+            read=1,
+            status=2,
+            backoff_factor=0.25,
+            status_forcelist=(429, 500, 502, 503, 504),
+            allowed_methods=frozenset({"GET"}),
+            respect_retry_after_header=True,
+        )
+        adapter = HTTPAdapter(max_retries=politica_retentativa)
+        sessao = requests.Session()
+        sessao.mount("https://", adapter)
+        sessao.mount("http://", adapter)
+        _HTTP_LOCAL.session = sessao
+    return sessao
 
 
 def obter_cliente_qdrant():
@@ -60,22 +84,85 @@ def obter_cliente_qdrant():
     if not QDRANT_URL or not QDRANT_API_KEY:
         return None
 
-    try:
-        cliente = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
-        cliente.set_model("BAAI/bge-small-en-v1.5")
+    with _QDRANT_LOCK:
+        if qdrant_cliente is not None:
+            return qdrant_cliente
 
-        if not cliente.collection_exists(NOME_COLECAO):
-            cliente.create_collection(
-                collection_name=NOME_COLECAO,
-                vectors_config=cliente.get_fastembed_vector_params(),
-            )
+        try:
+            from qdrant_client import QdrantClient
+            from qdrant_client.http.models import Distance, VectorParams
 
-        qdrant_cliente = cliente
-    except Exception as e:
-        qdrant_cliente = None
-        sys.stderr.write(f"Erro ao conectar ao Qdrant: {e}\n")
+            cliente = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
+
+            if not cliente.collection_exists(NOME_COLECAO):
+                cliente.create_collection(
+                    collection_name=NOME_COLECAO,
+                    vectors_config=VectorParams(
+                        size=DIMENSAO_EMBEDDING,
+                        distance=Distance.COSINE,
+                    ),
+                )
+
+            qdrant_cliente = cliente
+        except Exception as e:
+            qdrant_cliente = None
+            sys.stderr.write(f"Erro ao conectar ao Qdrant: {e}\n")
 
     return qdrant_cliente
+
+
+def obter_modelo_embedding():
+    global modelo_embedding
+
+    if modelo_embedding is not None:
+        return modelo_embedding
+
+    with _QDRANT_LOCK:
+        if modelo_embedding is not None:
+            return modelo_embedding
+        from fastembed import TextEmbedding
+
+        modelo_embedding = TextEmbedding(model_name=NOME_MODELO_EMBEDDING)
+    return modelo_embedding
+
+
+def obter_ids_documento_qdrant(
+    client: Any,
+    fonte: str,
+    categoria: str,
+) -> list[Any]:
+    from qdrant_client.http import models
+
+    filtro = models.Filter(
+        must=[
+            models.FieldCondition(
+                key="departamento",
+                match=models.MatchValue(value=RAG_DEPARTAMENTO_PADRAO),
+            ),
+            models.FieldCondition(
+                key="fonte",
+                match=models.MatchValue(value=fonte),
+            ),
+            models.FieldCondition(
+                key="categoria",
+                match=models.MatchValue(value=categoria),
+            ),
+        ]
+    )
+    ids: list[Any] = []
+    offset = None
+    while True:
+        pontos, offset = client.scroll(
+            collection_name=NOME_COLECAO,
+            scroll_filter=filtro,
+            limit=256,
+            with_payload=False,
+            with_vectors=False,
+            offset=offset,
+        )
+        ids.extend(ponto.id for ponto in pontos)
+        if offset is None:
+            return ids
 
 
 # -----------------------------------------------------------------------------
@@ -139,8 +226,10 @@ DICIONARIO_DADOS_DETALHADO = {
 # -----------------------------------------------------------------------------
 # CACHE COM TTL
 # -----------------------------------------------------------------------------
-CACHE_MEMORIA: Dict[str, Dict[str, Any]] = {}
+CACHE_MEMORIA: OrderedDict[str, Dict[str, Any]] = OrderedDict()
 CACHE_TTL_SEGUNDOS = 300
+CACHE_MAX_ENTRADAS = 256
+_CACHE_LOCK = RLock()
 
 
 def com_cache(ttl_segundos: int = CACHE_TTL_SEGUNDOS):
@@ -152,35 +241,44 @@ def com_cache(ttl_segundos: int = CACHE_TTL_SEGUNDOS):
                 f"{json.dumps(args, ensure_ascii=False, default=str)}:"
                 f"{json.dumps(kwargs, ensure_ascii=False, sort_keys=True, default=str)}"
             )
-            agora = time.time()
+            agora = time.monotonic()
 
-            # Remove entradas expiradas para evitar crescimento indefinido.
-            chaves_expiradas = [
-                chave
-                for chave, registro in CACHE_MEMORIA.items()
-                if agora - registro["timestamp"] >= registro.get("ttl", CACHE_TTL_SEGUNDOS)
-            ]
-            for chave in chaves_expiradas:
-                CACHE_MEMORIA.pop(chave, None)
-
-            registro = CACHE_MEMORIA.get(chave_cache)
-            if registro is not None:
-                dados = registro["dados"]
-                if isinstance(dados, str):
-                    return dados + "\n\n⚡ *(Resposta obtida do cache)*"
-                return dados
+            with _CACHE_LOCK:
+                registro = CACHE_MEMORIA.get(chave_cache)
+                if registro is not None:
+                    if agora - registro["timestamp"] < registro.get(
+                        "ttl", CACHE_TTL_SEGUNDOS
+                    ):
+                        CACHE_MEMORIA.move_to_end(chave_cache)
+                        dados = registro["dados"]
+                        if isinstance(dados, str):
+                            return dados + "\n\n⚡ *(Resposta obtida do cache)*"
+                        return dados
+                    CACHE_MEMORIA.pop(chave_cache, None)
 
             resultado = func(*args, **kwargs)
-            CACHE_MEMORIA[chave_cache] = {
-                "timestamp": agora,
-                "ttl": ttl_segundos,
-                "dados": resultado,
-            }
+            with _CACHE_LOCK:
+                CACHE_MEMORIA[chave_cache] = {
+                    "timestamp": time.monotonic(),
+                    "ttl": ttl_segundos,
+                    "dados": resultado,
+                }
+                CACHE_MEMORIA.move_to_end(chave_cache)
+                while len(CACHE_MEMORIA) > CACHE_MAX_ENTRADAS:
+                    CACHE_MEMORIA.popitem(last=False)
             return resultado
 
         return wrapper
 
     return decorator
+
+
+def invalidar_cache_funcao(nome_funcao: str) -> None:
+    prefixo = f"{nome_funcao}:"
+    with _CACHE_LOCK:
+        for chave in list(CACHE_MEMORIA):
+            if chave.startswith(prefixo):
+                CACHE_MEMORIA.pop(chave, None)
 
 
 def dividir_em_chunks(
@@ -218,8 +316,6 @@ def indexar_documento_com_chunking(
     texto: str,
     fonte: str = "Upload Manual",
     categoria: str = "Geral",
-    departamento: str = "TI",
-    nivel_acesso: int = 1,
 ) -> str:
     """Divide um texto longo em chunks e indexa no Qdrant Cloud com metadados ricos e PII sanitizado."""
     client = obter_cliente_qdrant()
@@ -227,6 +323,13 @@ def indexar_documento_com_chunking(
         return "⚠️ Qdrant Cloud não configurado ou indisponível."
 
     try:
+        if len(texto) > MAX_DOCUMENTO_CHARS:
+            return (
+                "Erro: O documento excede o limite de "
+                f"{MAX_DOCUMENTO_CHARS:,} caracteres."
+            )
+        if len(fonte) > 255 or len(categoria) > 128:
+            return "Erro: A fonte ou categoria excede o tamanho permitido."
         texto_sanitizado = mascarar_dados_sensiveis(texto)
         chunks = dividir_em_chunks(texto_sanitizado)
 
@@ -237,21 +340,60 @@ def indexar_documento_com_chunking(
             {
                 "fonte": fonte,
                 "categoria": categoria,
-                "departamento": departamento,
-                "nivel_acesso": nivel_acesso,
+                "departamento": RAG_DEPARTAMENTO_PADRAO,
+                "nivel_acesso": RAG_NIVEL_ACESSO_PADRAO,
                 "chunk_index": i,
                 "total_chunks": len(chunks),
+                "document": chunk,
             }
+            for i, chunk in enumerate(chunks)
+        ]
+        ids = [
+            str(
+                uuid.uuid5(
+                    uuid.NAMESPACE_URL,
+                    f"vetra-rag:{RAG_DEPARTAMENTO_PADRAO}:{fonte}:{categoria}:{i}",
+                )
+            )
             for i in range(len(chunks))
         ]
 
-        client.add(
+        from qdrant_client.http import models
+
+        modelo = obter_modelo_embedding()
+        vetores = [vetor.tolist() for vetor in modelo.embed(chunks)]
+        if len(vetores) != len(chunks):
+            raise RuntimeError("O modelo de embedding retornou quantidade inesperada de vetores.")
+        ids_existentes = obter_ids_documento_qdrant(client, fonte, categoria)
+        pontos = [
+            models.PointStruct(
+                id=identificador,
+                vector=vetor,
+                payload=metadado,
+            )
+            for identificador, vetor, metadado in zip(ids, vetores, metadados)
+        ]
+        client.upsert(
             collection_name=NOME_COLECAO,
-            documents=chunks,
-            metadata=metadados,
+            points=pontos,
+            wait=True,
         )
+        ids_novos = set(ids)
+        ids_obsoletos = [
+            identificador
+            for identificador in ids_existentes
+            if str(identificador) not in ids_novos
+        ]
+        if ids_obsoletos:
+            client.delete(
+                collection_name=NOME_COLECAO,
+                points_selector=ids_obsoletos,
+                wait=True,
+            )
+        invalidar_cache_funcao("buscar_conhecimento_rag")
         return (
-            f"✅ Documento '{fonte}' sanitizado e indexado com sucesso! "
+            f"✅ Documento '{fonte}' sanitizado e indexado com sucesso "
+            "com embeddings locais e acesso controlado! "
             f"({len(chunks)} chunks criados no Qdrant)."
         )
     except Exception as e:
@@ -263,8 +405,6 @@ def indexar_documento_com_chunking(
 def buscar_conhecimento_rag(
     termo_busca: str,
     limite: int = 3,
-    departamento_usuario: str = "TI",
-    nivel_acesso: int = 1,
 ) -> str:
     """Realiza busca vetorial/semântica no Qdrant Cloud aplicando RBAC por departamento e nível de acesso."""
     client = obter_cliente_qdrant()
@@ -277,12 +417,20 @@ def buscar_conhecimento_rag(
         return "Erro: O limite deve ser maior que zero."
 
     try:
+        from core.rag_guard import (
+            buscar_conhecimento_rag as rag_guard_buscar,
+            PROMPT_SISTEMA_VETRA,
+        )
+
+        vetor_consulta = next(
+            iter(obter_modelo_embedding().query_embed(termo_busca))
+        ).tolist()
         resultados = rag_guard_buscar(
             client=client,
             collection_name=NOME_COLECAO,
-            query_vector=termo_busca,
-            departamento_usuario=departamento_usuario,
-            nivel_acesso=nivel_acesso,
+            query_vector=vetor_consulta,
+            departamento_usuario=RAG_DEPARTAMENTO_PADRAO,
+            nivel_acesso=RAG_NIVEL_ACESSO_PADRAO,
             limit=limite,
         )
 
@@ -327,8 +475,26 @@ def buscar_conhecimento_rag(
 
 @mcp.tool()
 def validar_e_executar_sql(query: str, dialecto: str = "postgres") -> str:
-    """Valida a sintaxe SQL via AST e checa a existência de tabelas e colunas."""
+    """Valida SELECT via AST para PostgreSQL, Databricks, MySQL, BigQuery ou Oracle; não executa SQL."""
     try:
+        def normalizar_identificador(identificador: str) -> str:
+            return (
+                identificador.casefold()
+                if dialecto == "oracle"
+                else identificador
+            )
+
+        dialectos_validos = {
+            "postgres": "postgres",
+            "postgresql": "postgres",
+            "databricks": "databricks",
+            "mysql": "mysql",
+            "bigquery": "bigquery",
+            "oracle": "oracle",
+        }
+        dialecto = dialectos_validos.get(dialecto.lower().strip())
+        if dialecto is None:
+            return "❌ Erro: O dialeto SQL informado não é suportado."
         statements = sqlglot.parse(query, read=dialecto)
         if len(statements) != 1:
             return "❌ Erro de Segurança: Apenas uma instrução SQL é permitida."
@@ -336,6 +502,14 @@ def validar_e_executar_sql(query: str, dialecto: str = "postgres") -> str:
         parsed = statements[0]
         if not isinstance(parsed, sqlglot.exp.Select):
             return "❌ Erro de Segurança: Apenas instruções SELECT são permitidas."
+        if parsed.args.get("into") or any(
+            isinstance(node, (sqlglot.exp.DML, sqlglot.exp.Command))
+            for node in parsed.walk()
+        ):
+            return (
+                "❌ Erro de Segurança: A consulta contém uma operação de "
+                "escrita ou comando não permitido."
+            )
 
         if not parsed.find(sqlglot.exp.Limit):
             parsed = parsed.limit(100)
@@ -344,18 +518,43 @@ def validar_e_executar_sql(query: str, dialecto: str = "postgres") -> str:
         aliases_tabelas = {}
         for tabela in parsed.find_all(sqlglot.exp.Table):
             nome_tabela = tabela.name
-            tabelas_citadas.append(nome_tabela)
-
-            if nome_tabela not in DICIONARIO_DADOS_DETALHADO:
+            nome_normalizado = normalizar_identificador(nome_tabela)
+            if tabela.catalog or (tabela.db and dialecto != "oracle"):
                 return (
-                    f"❌ Erro de Schema: A tabela '{nome_tabela}' não existe "
-                    f"no ambiente. Tabelas válidas: "
-                    f"{list(DICIONARIO_DADOS_DETALHADO.keys())}"
+                    "❌ Erro de Schema: Catálogos e schemas explícitos não "
+                    "são permitidos nesta validação, exceto owner/schema no Oracle."
                 )
 
-            aliases_tabelas[nome_tabela] = nome_tabela
+            if nome_normalizado == "dual" and dialecto == "oracle":
+                tabela_real = "dual"
+                colunas_tabela = {"dummy"}
+            else:
+                tabela_real = next(
+                    (
+                        nome
+                        for nome in DICIONARIO_DADOS_DETALHADO
+                        if normalizar_identificador(nome) == nome_normalizado
+                    ),
+                    None,
+                )
+                if tabela_real is None:
+                    return (
+                        f"❌ Erro de Schema: A tabela '{nome_tabela}' não "
+                        f"existe no ambiente. Tabelas válidas: "
+                        f"{list(DICIONARIO_DADOS_DETALHADO.keys())}"
+                    )
+                colunas_tabela = {
+                    normalizar_identificador(coluna)
+                    for coluna in DICIONARIO_DADOS_DETALHADO[tabela_real]["colunas"]
+                }
+
+            tabelas_citadas.append(tabela_real)
             if tabela.alias:
-                aliases_tabelas[tabela.alias] = nome_tabela
+                aliases_tabelas[normalizar_identificador(tabela.alias)] = (
+                    tabela_real,
+                    colunas_tabela,
+                )
+            aliases_tabelas[nome_normalizado] = (tabela_real, colunas_tabela)
 
         if not tabelas_citadas:
             return "❌ Erro de Schema: Nenhuma tabela foi informada."
@@ -363,23 +562,27 @@ def validar_e_executar_sql(query: str, dialecto: str = "postgres") -> str:
         tabelas_unicas = list(dict.fromkeys(tabelas_citadas))
 
         for coluna in parsed.find_all(sqlglot.exp.Column):
-            nome_coluna = coluna.name
-            qualificador = coluna.table
+            nome_coluna = normalizar_identificador(coluna.name)
+            qualificador = normalizar_identificador(coluna.table)
 
             if nome_coluna == "*":
                 continue
+            if dialecto == "oracle" and nome_coluna in {
+                "level",
+                "ora_rowscn",
+                "rowid",
+                "rownum",
+            }:
+                continue
 
             if qualificador:
-                tabela_real = aliases_tabelas.get(qualificador)
-                if tabela_real is None:
+                contexto_tabela = aliases_tabelas.get(qualificador)
+                if contexto_tabela is None:
                     return (
                         f"❌ Erro de Schema: A tabela ou alias "
                         f"'{qualificador}' não existe na consulta."
                     )
-
-                colunas_tabela = DICIONARIO_DADOS_DETALHADO[tabela_real][
-                    "colunas"
-                ]
+                tabela_real, colunas_tabela = contexto_tabela
                 if nome_coluna not in colunas_tabela:
                     return (
                         f"❌ Erro de Schema: A coluna '{nome_coluna}' não "
@@ -389,8 +592,14 @@ def validar_e_executar_sql(query: str, dialecto: str = "postgres") -> str:
                 tabelas_compativeis = [
                     tabela
                     for tabela in tabelas_unicas
-                    if nome_coluna
-                    in DICIONARIO_DADOS_DETALHADO[tabela]["colunas"]
+                    if nome_coluna in (
+                        {"dummy"}
+                        if tabela == "dual"
+                        else {
+                            normalizar_identificador(coluna)
+                            for coluna in DICIONARIO_DADOS_DETALHADO[tabela]["colunas"]
+                        }
+                    )
                 ]
 
                 if not tabelas_compativeis:
@@ -533,7 +742,7 @@ def consultar_ibge_sidra(
             "?localidades=N1[all]"
         )
         headers = {"User-Agent": "VetraDataAgent/1.0"}
-        response = requests.get(url, headers=headers, timeout=15)
+        response = obter_sessao_http().get(url, headers=headers, timeout=15)
 
         if response.status_code != 200:
             return f"Error: API IBGE/SIDRA retornou status {response.status_code}."
@@ -565,6 +774,8 @@ def consultar_ibge_sidra(
                             }
                         )
 
+        import pandas as pd
+
         df_res = pd.DataFrame(resultados)
         retorno_json = {
             "colunas": list(df_res.columns),
@@ -586,7 +797,7 @@ def buscar_dados_municipio_ibge(nome_municipio: str) -> str:
             f"{nome_municipio}"
         )
         headers = {"User-Agent": "VetraDataAgent/1.0"}
-        response = requests.get(url, headers=headers, timeout=10)
+        response = obter_sessao_http().get(url, headers=headers, timeout=10)
 
         if response.status_code != 200 or not response.json():
             return f"Município '{nome_municipio}' não encontrado."
@@ -625,11 +836,13 @@ def consultar_indicadores_bcb(codigo_serie: int = 432) -> str:
             "https://api.bcb.gov.br/dados/serie/"
             f"bcdata.sgs.{codigo_serie}/dados/ultimos/12?formato=json"
         )
-        response = requests.get(url, timeout=10)
+        response = obter_sessao_http().get(url, timeout=10)
         if response.status_code != 200:
             return f"Erro ao acessar Banco Central: Status {response.status_code}"
 
         dados = response.json()
+        import pandas as pd
+
         df = pd.DataFrame(dados)
         df["valor"] = pd.to_numeric(df["valor"], errors="coerce")
 
@@ -653,7 +866,7 @@ def consultar_cnpj_brasilapi(cnpj: str) -> str:
             return "CNPJ inválido: informe 14 dígitos."
 
         url = f"https://brasilapi.com.br/api/cnpj/v1/{cnpj_limpo}"
-        res = requests.get(url, timeout=10)
+        res = obter_sessao_http().get(url, timeout=10)
         if res.status_code != 200:
             return f"CNPJ {cnpj} não encontrado."
 
@@ -683,7 +896,7 @@ def consultar_cep_brasilapi(cep: str) -> str:
             return "CEP inválido: informe 8 dígitos."
 
         url = f"https://brasilapi.com.br/api/cep/v2/{cep_limpo}"
-        res = requests.get(url, timeout=10)
+        res = obter_sessao_http().get(url, timeout=10)
         if res.status_code != 200:
             return f"CEP {cep} não encontrado."
 
@@ -700,7 +913,7 @@ def consultar_cotacao_moeda(
     """Consulta cotações e variações percentuais em tempo real via AwesomeAPI."""
     try:
         url = f"https://economia.awesomeapi.com.br/last/{par_moedas}"
-        res = requests.get(url, timeout=5)
+        res = obter_sessao_http().get(url, timeout=5)
         if res.status_code != 200:
             return f"Erro em cotações: Status {res.status_code}"
 
@@ -739,7 +952,7 @@ def geocodificar_endereco(localidade: str) -> str:
     """Obtém coordenadas geográficas (Lat/Lon) via OpenStreetMap."""
     try:
         headers = {"User-Agent": "VetraDataAgent/1.0"}
-        res = requests.get(
+        res = obter_sessao_http().get(
             "https://nominatim.openstreetmap.org/search",
             params={"q": localidade, "format": "json", "limit": 1},
             headers=headers,
@@ -780,7 +993,7 @@ def consultar_clima_open_meteo(
             "https://api.open-meteo.com/v1/forecast?"
             f"latitude={latitude}&longitude={longitude}&current_weather=true"
         )
-        res = requests.get(url, timeout=10)
+        res = obter_sessao_http().get(url, timeout=10)
         if res.status_code != 200:
             return f"Erro ao acessar Open-Meteo: Status {res.status_code}"
 
@@ -808,7 +1021,7 @@ def consultar_futebol_liga(codigo_liga: str = "BSA") -> str:
         api_token = os.environ.get("FOOTBALL_DATA_API_KEY", "")
         headers = {"X-Auth-Token": api_token} if api_token else {}
 
-        res = requests.get(url, headers=headers, timeout=10)
+        res = obter_sessao_http().get(url, headers=headers, timeout=10)
         if res.status_code != 200:
             return f"⚠️ API Futebol retornou status {res.status_code}."
 
@@ -855,6 +1068,9 @@ def gerar_previsao_generica(
 ) -> str:
     """Projeta uma variável numérica ao longo do tempo usando Suavização Exponencial."""
     try:
+        import pandas as pd
+        from statsmodels.tsa.api import ExponentialSmoothing, SimpleExpSmoothing
+
         if periodos_frente < 1:
             return "Erro: periodos_frente deve ser maior que zero."
 
@@ -943,6 +1159,11 @@ def detectar_anomalias_generico(
 ) -> str:
     """Identifica padrões atípicos e outliers utilizando Isolation Forest."""
     try:
+        import pandas as pd
+        from sklearn.ensemble import IsolationForest
+        from sklearn.impute import SimpleImputer
+        from sklearn.preprocessing import StandardScaler
+
         dados = json.loads(dados_json)
         df = (
             pd.DataFrame(dados["linhas"], columns=dados["colunas"])
@@ -1011,6 +1232,11 @@ def agrupar_dados_generico(
 ) -> str:
     """Descobre agrupamentos e perfis nos dados utilizando K-Means."""
     try:
+        import pandas as pd
+        from sklearn.cluster import KMeans
+        from sklearn.impute import SimpleImputer
+        from sklearn.preprocessing import StandardScaler
+
         dados = json.loads(dados_json)
         df = (
             pd.DataFrame(dados["linhas"], columns=dados["colunas"])
@@ -1105,6 +1331,9 @@ def analisar_correlacao_e_importancia(
 ) -> str:
     """Avalia a importância relativa de cada variável para explicar uma métrica-alvo."""
     try:
+        import pandas as pd
+        from sklearn.ensemble import RandomForestRegressor
+
         dados = json.loads(dados_json)
         df = (
             pd.DataFrame(dados["linhas"], columns=dados["colunas"])
@@ -1187,6 +1416,9 @@ def testar_hipotese_estatistica(
 ) -> str:
     """Realiza teste T de Student em duas amostras para avaliar diferença entre dois grupos."""
     try:
+        import pandas as pd
+        from scipy import stats
+
         dados = json.loads(dados_json)
         df = (
             pd.DataFrame(dados["linhas"], columns=dados["colunas"])

@@ -7,6 +7,17 @@ primary_region = "gru"
 [env]
   PYTHONUNBUFFERED = "1"
   VETRA_API_URL = "http://backend.process.vetra-data-agent.internal:8000"
+  STREAMLIT_SERVER_HEADLESS = "true"
+  STREAMLIT_SERVER_MAXUPLOADSIZE = "10"
+  STREAMLIT_SERVER_MAXMESSAGESIZE = "32"
+  VETRA_OCR_LANG = "por+eng"
+  VETRA_MAX_UPLOAD_BYTES = "10485760"
+  VETRA_MAX_ATTACHMENT_BYTES = "10485760"
+  VETRA_MAX_TOTAL_ATTACHMENT_BYTES = "26214400"
+  VETRA_MAX_ATTACHMENTS = "10"
+  VETRA_MAX_ATTACHMENT_TEXT_CHARS = "100000"
+  VETRA_MAX_PDF_PAGES = "500"
+  VETRA_MAX_TEXTO_RAG = "90000"
 
 # Declaração dos dois processos isolados em VMs separadas no Fly.io
 [processes]
@@ -27,7 +38,25 @@ primary_region = "gru"
     hard_limit = 25
     soft_limit = 20
 
+  [[http_service.checks]]
+    grace_period = "30s"
+    interval = "15s"
+    method = "get"
+    path = "/_stcore/health"
+    timeout = "5s"
+
+[checks]
+  [checks.backend]
+    grace_period = "60s"
+    interval = "30s"
+    method = "get"
+    path = "/health"
+    port = 8000
+    processes = ["backend"]
+    timeout = "5s"
+    type = "http"
+
 [[vm]]
   cpu_kind = "shared"
   cpus = 1
-  memory_mb = 1024
+  memory = "1gb"

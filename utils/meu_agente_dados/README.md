@@ -26,6 +26,37 @@ graph TD
 
 📝 Changelog
 
+[Próxima versão]
+
+* Backend mantém uma sessão MCP persistente por worker FastAPI; o processo e a conexão deixam de ser recriados a cada mensagem.
+* Respostas Gemini usam streaming assíncrono real. O SSE publica tokens, andamento, ferramentas em execução e conclusão; a UI atualiza a resposta progressivamente.
+* O ciclo agente limita concorrência, tempo total, etapas, tamanho de resultados e histórico; chamadas de ferramentas independentes podem rodar em paralelo.
+* O health endpoint verifica a conexão MCP com ping, informa ferramentas/configuração Gemini e sinaliza degradação. Se a conexão falhar, a próxima consulta aguarda chamadas em curso e reinicia a sessão MCP antes de prosseguir.
+* Cliente HTTP do MCP reaproveita conexões por thread e repete GETs transitórios (429/5xx) com backoff.
+* Cache LRU limitado a 256 entradas, com expiração monotônica e acesso protegido por lock.
+* Qdrant usa os APIs atuais (`query_points`/`upsert`) e embeddings FastEmbed locais; a indexação usa IDs determinísticos, substitui chunks antigos e aplica departamento/nível de acesso do servidor — não definido pelo modelo.
+* Validação SQL rejeita SELECT INTO, DML dentro de CTE e schemas explícitos em dialetos não Oracle; a consulta continua simulada, sem execução no banco.
+* Limites de anexos e páginas de PDF são verificados antes do processamento; erros/streams incompletos não repetem chamadas que poderiam já ter executado ferramentas.
+* O seletor inclui Oracle SQL: a ferramenta usa o parser Oracle do SQLGlot, valida nomes de objetos sem diferenciar maiúsculas/minúsculas, aceita owner/schema e DUAL, reconhece pseudocolunas comuns e aplica limite de resultados. Não há conexão nem execução em Oracle.
+* Anexos aceitam imagens, PDF, Office, código/configuração, dados tabulares e formatos multimodais comuns de áudio/vídeo. Office, código e dados tabulares são extraídos para texto com limites; imagens/PDF digitalizados podem usar OCR se Tesseract estiver instalado. Arquivos desconhecidos, executáveis e compactados são rejeitados.
+* Feedback 👍/👎 com correção pode ser exportado como JSONL para curadoria. Os dados ficam apenas na sessão do Streamlit até serem baixados; não há treinamento automático. Revise conteúdo sensível antes de compartilhar.
+
+### Docker e Fly.io
+
+* A imagem de produção é construída a partir da raiz do repositório usando `Dockerfile` e `requirements-vetra.txt`; não use `utils/meu_agente_dados` como contexto de build.
+* O `docker-compose.yml` em `utils/meu_agente_dados` inicia frontend e backend separados a partir da mesma imagem. Crie `.env` na raiz com credenciais antes de executar `docker compose -f utils/meu_agente_dados/docker-compose.yml up --build`.
+* A imagem instala Tesseract com idiomas português e inglês. Em ambientes não Docker, OCR exige que Tesseract e os dados dos idiomas configurados em `VETRA_OCR_LANG` estejam instalados.
+* O limite do Streamlit é 10 MiB por arquivo; os limites de API são 10 MiB por arquivo e 25 MiB total por requisição. Ajuste `STREAMLIT_SERVER_MAXUPLOADSIZE`, `VETRA_MAX_UPLOAD_BYTES`, `VETRA_MAX_ATTACHMENT_BYTES` e `VETRA_MAX_TOTAL_ATTACHMENT_BYTES` em conjunto ao mudar os valores.
+* O Fly.io executa verificações de saúde separadas para Streamlit e FastAPI. Credenciais devem ser configuradas com `fly secrets set`; não as inclua em `[env]`, `.env` enviado ao repositório ou na imagem.
+
+Configurações adicionais do backend (todas opcionais):
+
+* `VETRA_AGENT_TIMEOUT` (240 s), `VETRA_MAX_CONCURRENT_AGENTS` (4), `VETRA_TOOL_TIMEOUT` (30 s), `VETRA_MAX_PASSOS_MCP` (5), `VETRA_MAX_TOOL_CALLS` (12), `VETRA_MAX_TOOL_RESULT_CHARS` (30000).
+* `VETRA_MAX_HISTORY_MESSAGES` (10), `VETRA_MAX_HISTORY_CHARS` (50000), `VETRA_MAX_ATTACHMENT_BYTES` (10 MiB), `VETRA_MAX_TOTAL_ATTACHMENT_BYTES` (25 MiB).
+* `VETRA_MAX_RAG_DOCUMENT_CHARS` (200000), `VETRA_MAX_PDF_PAGES` (500).
+* `VETRA_MAX_UPLOAD_BYTES` (10 MiB), `VETRA_MAX_ATTACHMENTS` (10), `VETRA_MAX_ATTACHMENT_TEXT_CHARS` (100000), `VETRA_MAX_TEXTO_RAG` (90000) e `VETRA_OCR_LANG` (`por+eng`). O dataset de feedback fica limitado a 200 registros por sessão.
+* `VETRA_RAG_DEPARTMENT` (TI) e `VETRA_RAG_ACCESS_LEVEL` (1) definem a identidade de acesso do worker MCP. Em ambientes multiusuário, a identidade deve ser vinculada à autenticação do usuário, não ampliada via argumentos do LLM.
+
 [v1.2.0] — 2026-09-28
 
 Adição de novas funções da Vetra:

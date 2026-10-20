@@ -1,16 +1,24 @@
 import asyncio
-import base64
 import json
+import logging
 import os
 import re
+import uuid
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 import pandas as pd
 import plotly.express as px
 import requests
 import streamlit as st
-from pypdf import PdfReader
+from utils.meu_agente_dados.attachments import (
+    CHAT_ONLY_EXTENSIONS,
+    MAX_UPLOAD_BYTES,
+    SUPPORTED_UPLOAD_EXTENSIONS,
+    extrair_texto_upload,
+    preparar_anexo,
+)
+from utils.meu_agente_dados.feedback import criar_registro_feedback, exportar_jsonl
 
 # =============================================================================
 # CONFIGURAÇÃO DA PÁGINA
@@ -29,9 +37,19 @@ API_BASE_URL = re.sub(r"/(chat|chat/stream)/?$", "", RAW_API_URL).rstrip("/")
 PRECO_INPUT_1M = 0.075
 PRECO_OUTPUT_1M = 0.30
 TAXA_CAMBIO_USD_BRL = 5.60
-MAX_UPLOAD_BYTES = int(os.environ.get("VETRA_MAX_UPLOAD_BYTES", 10 * 1024 * 1024))
-MAX_TEXTO_RAG = int(os.environ.get("VETRA_MAX_TEXTO_RAG", 100_000))
+MAX_TEXTO_RAG = min(
+    int(os.environ.get("VETRA_MAX_TEXTO_RAG", 90_000)),
+    90_000,
+)
+MAX_TOTAL_UPLOAD_BYTES = int(
+    os.environ.get("VETRA_MAX_TOTAL_ATTACHMENT_BYTES", 25 * 1024 * 1024)
+)
+MAX_ATTACHMENTS = int(os.environ.get("VETRA_MAX_ATTACHMENTS", "10"))
+MAX_FEEDBACK_EXAMPLES = 200
+if min(MAX_TOTAL_UPLOAD_BYTES, MAX_ATTACHMENTS) < 1:
+    raise ValueError("Os limites de upload da Vetra devem ser maiores que zero.")
 HTTP_TIMEOUT = (5, 60)
+logger = logging.getLogger("vetra.streamlit")
 
 MODELOS_PREFERENCIA = [
     "gemini-3.8-flash",
@@ -40,7 +58,7 @@ MODELOS_PREFERENCIA = [
 ]
 
 CATALOGO_FERRAMENTAS = [
-    {"nome": "validar_e_executar_sql", "descricao": "Valida via AST e Schema-Aware antes de rodar"},
+    {"nome": "validar_e_executar_sql", "descricao": "Valida via AST e schema; não executa no banco"},
     {"nome": "buscar_conhecimento_rag", "descricao": "Busca vetorial/semântica no Qdrant Cloud com Cache"},
     {"nome": "indexar_documento_com_chunking", "descricao": "Chunking + Ingestão no Qdrant Cloud (PII Masked)"},
     {"nome": "listar_esquemas_e_tabelas", "descricao": "Lista tabelas e visões do ambiente"},
@@ -91,9 +109,10 @@ if "messages" not in st.session_state:
     }]
 for chave, valor in {
     "pending_prompt": None,
+    "feedback_notice": None,
     "ultimo_modelo": None,
     "total_chamadas_mcp": 0,
-    "rag_feedbacks": [],
+    "feedback_fine_tuning": [],
     "total_tokens_input": 0,
     "total_tokens_output": 0,
     "custo_acumulado_usd": 0.0,
@@ -146,38 +165,13 @@ def analisar_explain_plan_sql(sql_query: str) -> list[str]:
     return alertas
 
 
-def extrair_texto_upload(arquivo) -> str:
-    arquivo.seek(0)
-    if arquivo.type == "application/pdf" or arquivo.name.lower().endswith(".pdf"):
-        reader = PdfReader(arquivo)
-        return "\n".join(page.extract_text() or "" for page in reader.pages).strip()
-    dados = arquivo.read()
-    for encoding in ("utf-8-sig", "utf-8", "latin-1"):
-        try:
-            return dados.decode(encoding)
-        except UnicodeDecodeError:
-            continue
-    raise ValueError("Não foi possível identificar a codificação do arquivo.")
-
-
-def preparar_anexo(arquivo) -> dict[str, str]:
-    arquivo.seek(0)
-    dados = arquivo.read()
-    if len(dados) > MAX_UPLOAD_BYTES:
-        raise ValueError(f"O arquivo '{arquivo.name}' excede o limite de {MAX_UPLOAD_BYTES // (1024 * 1024)} MB.")
-    return {
-        "nome": os.path.basename(arquivo.name),
-        "mime_type": arquivo.type or "application/octet-stream",
-        "conteudo_b64": base64.b64encode(dados).decode("ascii"),
-    }
-
-
 try:
     from utils.meu_agente_dados.main import processar_mcp_e_llm
     HAS_LOCAL_ORCHESTRATOR = True
 except Exception:
     processar_mcp_e_llm = None
     HAS_LOCAL_ORCHESTRATOR = False
+    logger.exception("Não foi possível carregar o orquestrador local da Vetra.")
 
 
 def executar_corrotina(corrotina):
@@ -188,7 +182,14 @@ def executar_corrotina(corrotina):
     raise RuntimeError("Já existe um loop assíncrono ativo; use o backend HTTP para esta execução.")
 
 
-def chamar_api_backend(prompt: str, historico: list, dialeto_sql: str, temperatura: float, anexos: Optional[list] = None):
+def chamar_api_backend(
+    prompt: str,
+    historico: list,
+    dialeto_sql: str,
+    temperatura: float,
+    anexos: Optional[list] = None,
+    on_event: Optional[Callable[[dict[str, Any]], None]] = None,
+):
     historico_recente = historico[-10:]
     historico_formatado = []
     for mensagem in historico_recente:
@@ -210,6 +211,8 @@ def chamar_api_backend(prompt: str, historico: list, dialeto_sql: str, temperatu
         "temperatura": max(0.0, min(2.0, float(temperatura))),
     }
     erros_http = []
+    stream_iniciado = False
+    stream_concluido = False
 
     try:
         with requests.post(
@@ -220,11 +223,14 @@ def chamar_api_backend(prompt: str, historico: list, dialeto_sql: str, temperatu
             timeout=HTTP_TIMEOUT,
         ) as response:
             if response.ok:
+                stream_iniciado = True
                 resposta_texto = ""
                 modelo_usado = "FastAPI-Backend"
                 mcp_chamado = False
                 dados_mcp_raw = None
-                for linha in response.iter_lines(decode_unicode=True):
+                for linha in response.iter_lines():
+                    if isinstance(linha, bytes):
+                        linha = linha.decode("utf-8", errors="replace")
                     if not linha or not linha.strip().startswith("data:"):
                         continue
                     texto_evento = linha.strip()[5:].strip()
@@ -234,9 +240,24 @@ def chamar_api_backend(prompt: str, historico: list, dialeto_sql: str, temperatu
                         conteudo = json.loads(texto_evento)
                     except json.JSONDecodeError:
                         continue
-                    if conteudo.get("error"):
-                        erros_http.append(str(conteudo["error"]))
-                        break
+                    if conteudo.get("type") == "error" or conteudo.get("error"):
+                        return (
+                            "❌ Erro retornado pelo backend: "
+                            f"{conteudo.get('message') or conteudo.get('error')}",
+                            None,
+                            False,
+                            None,
+                        )
+                    if on_event is not None and conteudo.get("type") not in {
+                        "done",
+                        None,
+                    }:
+                        on_event(conteudo)
+                    if conteudo.get("type") == "done" or (
+                        conteudo.get("type") is None
+                        and conteudo.get("resposta") is not None
+                    ):
+                        stream_concluido = True
                     trecho = conteudo.get("resposta")
                     if trecho is not None:
                         # Compatível com backends que enviam resposta acumulada ou chunks.
@@ -244,12 +265,36 @@ def chamar_api_backend(prompt: str, historico: list, dialeto_sql: str, temperatu
                     modelo_usado = conteudo.get("modelo_usado", modelo_usado)
                     mcp_chamado = bool(conteudo.get("mcp_chamado", mcp_chamado))
                     dados_mcp_raw = conteudo.get("dados_mcp_raw", dados_mcp_raw)
-                if resposta_texto.strip():
+                if stream_concluido and resposta_texto.strip():
                     return resposta_texto, modelo_usado, mcp_chamado, dados_mcp_raw
+                if stream_iniciado:
+                    return (
+                        "❌ O stream do backend terminou antes de enviar uma "
+                        "resposta completa. A chamada não será repetida para "
+                        "evitar executar novamente as ferramentas.",
+                        None,
+                        False,
+                        None,
+                    )
             else:
                 erros_http.append(f"stream HTTP {response.status_code}")
+                if response.status_code not in {404, 405, 501}:
+                    return (
+                        f"❌ O backend recusou o stream (HTTP {response.status_code}).",
+                        None,
+                        False,
+                        None,
+                    )
     except requests.RequestException as erro:
         erros_http.append(f"stream: {erro}")
+        if stream_iniciado:
+            return (
+                "❌ A conexão do stream foi interrompida; a consulta não será "
+                "repetida para evitar duplicar chamadas de ferramentas.",
+                None,
+                False,
+                None,
+            )
 
     try:
         with requests.post(
@@ -272,8 +317,19 @@ def chamar_api_backend(prompt: str, historico: list, dialeto_sql: str, temperatu
 
     if HAS_LOCAL_ORCHESTRATOR and processar_mcp_e_llm is not None:
         try:
+            async def publicar_evento_local(evento: dict[str, Any]) -> None:
+                if on_event is not None:
+                    on_event(evento)
+
             resposta, modelo_usado, mcp_chamado, retorno_mcp = executar_corrotina(
-                processar_mcp_e_llm(prompt, historico_formatado, dialeto_sql, temperatura, anexos or [])
+                processar_mcp_e_llm(
+                    prompt,
+                    historico_formatado,
+                    dialeto_sql,
+                    temperatura,
+                    anexos or [],
+                    on_event=publicar_evento_local,
+                )
             )
             return str(resposta), f"{modelo_usado} (In-Memory)", bool(mcp_chamado), retorno_mcp
         except Exception as erro:
@@ -306,6 +362,28 @@ with st.sidebar:
     st.markdown(f'<span class="vt-pill"><span class="vt-dot"></span>{status_texto}</span>', unsafe_allow_html=True)
     st.markdown('<div class="vt-sep"></div>', unsafe_allow_html=True)
 
+    st.markdown('<div class="vt-card-title">Feedback e dataset de fine-tuning</div>', unsafe_allow_html=True)
+    registros_feedback = st.session_state.feedback_fine_tuning
+    st.caption(
+        f"{len(registros_feedback)} exemplo(s) revisado(s). "
+        "Nenhum treinamento é iniciado automaticamente."
+    )
+    if registros_feedback:
+        st.warning(
+            "O JSONL contém prompts e respostas. Revise dados pessoais ou "
+            "confidenciais antes de compartilhar."
+        )
+        st.download_button(
+            "Baixar dataset JSONL",
+            data=exportar_jsonl(registros_feedback),
+            file_name=f"vetra_feedback_{datetime.now():%Y%m%d_%H%M%S}.jsonl",
+            mime="application/x-ndjson",
+            key="download_feedback_jsonl",
+        )
+    if st.session_state.feedback_notice:
+        st.success(st.session_state.feedback_notice)
+        st.session_state.feedback_notice = None
+
     with st.expander("⚡ Prompts Rápidos", expanded=False):
         for rotulo, texto in [
             ("📊 Consultar OTIF Geral", "Calcular indicador OTIF acumulado da empresa"),
@@ -318,7 +396,21 @@ with st.sidebar:
 
     st.markdown('<div class="vt-sep"></div>', unsafe_allow_html=True)
     st.markdown('<div class="vt-card-title">Ingestão RAG (Qdrant)</div>', unsafe_allow_html=True)
-    arquivo_uploaded = st.file_uploader("Carregar PDF, TXT ou CSV", type=["pdf", "txt", "csv"], key="uploader_rag")
+    extensoes_rag = sorted(
+        extension.lstrip(".")
+        for extension in SUPPORTED_UPLOAD_EXTENSIONS
+        if extension not in CHAT_ONLY_EXTENSIONS
+    )
+    arquivo_uploaded = st.file_uploader(
+        "Carregar documento ou imagem para indexação",
+        type=extensoes_rag,
+        key="uploader_rag",
+        help="PDF, Office, código, dados tabulares e imagens com texto (OCR disponível no servidor).",
+    )
+    st.caption(
+        "A indexação envia o texto extraído ao Qdrant configurado. "
+        "Não inclua dados sem autorização."
+    )
     cat_input = st.text_input("Categoria/Tag", value="Documentação Técnica")
     if st.button("Indexar Arquivo no RAG", use_container_width=True) and arquivo_uploaded:
         try:
@@ -340,7 +432,7 @@ with st.sidebar:
 
     st.markdown('<div class="vt-sep"></div>', unsafe_allow_html=True)
     st.markdown('<div class="vt-card-title">Preferências de Memória</div>', unsafe_allow_html=True)
-    dialetos = ["PostgreSQL", "Databricks SQL", "MySQL", "BigQuery"]
+    dialetos = ["PostgreSQL", "Databricks SQL", "MySQL", "BigQuery", "Oracle"]
     atual = st.session_state.preferencias_usuario.get("dialeto_sql", "PostgreSQL")
     st.session_state.preferencias_usuario["dialeto_sql"] = st.selectbox("Dialeto SQL Alvo", dialetos, index=dialetos.index(atual) if atual in dialetos else 0)
     st.session_state.preferencias_usuario["mascarar_pii"] = st.toggle("Mascaramento de PII", value=bool(st.session_state.preferencias_usuario.get("mascarar_pii", True)), help="Mascara automaticamente CPFs, E-mails e Nomes na exibição.")
@@ -380,30 +472,113 @@ for mensagem in st.session_state.messages:
     role = "assistant" if mensagem.get("role") == "model" else mensagem.get("role", "user")
     with st.chat_message(role, avatar=AVATAR_MODELO if role == "assistant" else AVATAR_USUARIO):
         st.markdown(str(mensagem.get("content", "")))
+        exchange_id = mensagem.get("exchange_id") if role == "assistant" else None
+        if exchange_id:
+            registro_existente = next(
+                (
+                    registro
+                    for registro in st.session_state.feedback_fine_tuning
+                    if registro["exchange_id"] == exchange_id
+                ),
+                None,
+            )
+            if registro_existente:
+                st.caption(
+                    "Feedback salvo: "
+                    + ("👍 útil" if registro_existente["avaliacao"] == "positive" else "👎 corrigido")
+                )
+            else:
+                with st.expander("Ajudar a melhorar a Vetra"):
+                    avaliacao_ui = st.feedback(
+                        "thumbs",
+                        key=f"rating_{exchange_id}",
+                    )
+                    resposta_corrigida = st.text_area(
+                        "Resposta ideal (obrigatória para avaliação negativa)",
+                        key=f"correcao_{exchange_id}",
+                        max_chars=100_000,
+                    )
+                    if st.button(
+                        "Salvar feedback para curadoria",
+                        key=f"salvar_feedback_{exchange_id}",
+                        disabled=(
+                            len(st.session_state.feedback_fine_tuning)
+                            >= MAX_FEEDBACK_EXAMPLES
+                        ),
+                    ):
+                        if avaliacao_ui is None:
+                            st.warning("Selecione 👍 ou 👎 antes de salvar.")
+                        else:
+                            try:
+                                registro = criar_registro_feedback(
+                                    exchange_id=exchange_id,
+                                    prompt=str(mensagem.get("prompt", "")),
+                                    resposta=str(mensagem.get("content", "")),
+                                    avaliacao="positive" if avaliacao_ui == 1 else "negative",
+                                    resposta_corrigida=resposta_corrigida,
+                                    dialeto_sql=str(mensagem.get("dialeto_sql", "")),
+                                    modelo=mensagem.get("modelo_usado"),
+                                    anexos=list(mensagem.get("anexos", [])),
+                                )
+                                st.session_state.feedback_fine_tuning.append(registro)
+                                st.session_state.feedback_notice = (
+                                    "Feedback incluído no dataset desta sessão."
+                                )
+                                st.rerun()
+                            except ValueError as erro:
+                                st.warning(str(erro))
+                if (
+                    len(st.session_state.feedback_fine_tuning)
+                    >= MAX_FEEDBACK_EXAMPLES
+                ):
+                    st.caption(
+                        f"Limite de {MAX_FEEDBACK_EXAMPLES} exemplos nesta sessão."
+                    )
 
 arquivos_anexados = st.file_uploader(
-    "📎 Anexar imagens (PNG, JPG) ou arquivos (PDF, TXT, CSV)",
-    type=["png", "jpg", "jpeg", "pdf", "txt", "csv"],
+    "📎 Anexar documentos, imagens, código, áudio ou vídeo",
+    type=sorted(extension.lstrip(".") for extension in SUPPORTED_UPLOAD_EXTENSIONS),
     accept_multiple_files=True,
     key=f"uploader_{len(st.session_state.messages)}",
+    help=(
+        "PDF, Office, texto/código, CSV/TSV/Parquet, PNG/JPG/WEBP, "
+        "áudio e vídeo compatíveis. Limite por arquivo: "
+        f"{MAX_UPLOAD_BYTES // (1024 * 1024)} MB."
+    ),
+)
+st.caption(
+    "Anexos de conversa são enviados ao provedor Gemini configurado. "
+    "Evite segredos, credenciais e dados pessoais sem autorização."
 )
 prompt = st.chat_input("Digite sua pergunta sobre os dados, envie um print ou solicite um SQL...")
 if st.session_state.pending_prompt and not prompt:
     prompt = st.session_state.pending_prompt
     st.session_state.pending_prompt = None
 
-if prompt or arquivos_anexados:
+anexos_payload = []
+erros_anexos = []
+if arquivos_anexados:
+    if len(arquivos_anexados) > MAX_ATTACHMENTS:
+        erros_anexos.append(
+            f"Envie no máximo {MAX_ATTACHMENTS} anexos por consulta."
+        )
+    tamanho_total = sum(arquivo.size for arquivo in arquivos_anexados)
+    if tamanho_total > MAX_TOTAL_UPLOAD_BYTES:
+        erros_anexos.append(
+            "O tamanho total dos anexos excede "
+            f"{MAX_TOTAL_UPLOAD_BYTES // (1024 * 1024)} MB."
+        )
+    if not erros_anexos:
+        for arquivo in arquivos_anexados:
+            try:
+                anexos_payload.append(preparar_anexo(arquivo))
+            except Exception as erro:
+                erros_anexos.append(str(erro))
+for erro in erros_anexos:
+    st.error(erro)
+
+if (prompt or arquivos_anexados) and not erros_anexos:
     prompt_texto = prompt or "Analise o(s) arquivo(s) em anexo."
-    anexos_payload = []
-    erros_anexos = []
-    for arquivo in arquivos_anexados or []:
-        try:
-            anexos_payload.append(preparar_anexo(arquivo))
-        except Exception as erro:
-            erros_anexos.append(str(erro))
-    if erros_anexos:
-        for erro in erros_anexos:
-            st.error(erro)
     if arquivos_anexados:
         prompt_texto += "\n\n📎 *Anexo(s): " + ", ".join(os.path.basename(a.name) for a in arquivos_anexados) + "*"
 
@@ -416,15 +591,46 @@ if prompt or arquivos_anexados:
     temp_atual = st.session_state.preferencias_usuario.get("temperatura", 0.2)
 
     with st.chat_message("assistant", avatar=AVATAR_MODELO):
+        resposta_stream = st.empty()
+        estado_stream = {"texto": ""}
         with st.status("🔍 *Processando consulta com inteligência de dados...*", expanded=True) as status_box:
             status_box.write("1. Conectando ao backend FastAPI e orquestrador MCP...")
-            resposta, modelo_usado, mcp_chamado, retorno_mcp = chamar_api_backend(prompt_texto, historico_copia, dialeto_atual, temp_atual, anexos_payload)
+
+            def atualizar_progresso(evento: dict[str, Any]) -> None:
+                tipo_evento = evento.get("type")
+                if tipo_evento == "status":
+                    status_box.write(str(evento.get("message", "Processando...")))
+                elif tipo_evento == "model":
+                    status_box.write(f"🤖 Consultando o modelo `{evento.get('name')}`...")
+                elif tipo_evento == "tool_start":
+                    status_box.write(
+                        f"🛠️ Executando `{evento.get('name')}` "
+                        f"(etapa {evento.get('step')}/{evento.get('total_steps')})..."
+                    )
+                elif tipo_evento == "tool_done":
+                    prefixo = "⚠️" if evento.get("error") else "✅"
+                    status_box.write(f"{prefixo} Ferramenta `{evento.get('name')}` concluída.")
+                elif tipo_evento == "reset":
+                    estado_stream["texto"] = ""
+                    resposta_stream.empty()
+                elif tipo_evento == "token":
+                    estado_stream["texto"] += str(evento.get("text", ""))
+                    resposta_stream.markdown(estado_stream["texto"])
+
+            resposta, modelo_usado, mcp_chamado, retorno_mcp = chamar_api_backend(
+                prompt_texto,
+                historico_copia,
+                dialeto_atual,
+                temp_atual,
+                anexos_payload,
+                on_event=atualizar_progresso,
+            )
             resposta = str(resposta or "Sem resposta do backend.")
             status_box.write("2. Sintetizando resposta final e validando regras...")
             estado_erro = resposta.startswith("❌")
             status_box.update(label="❌ Falha no processamento" if estado_erro else "✅ Processamento concluído com sucesso!", state="error" if estado_erro else "complete", expanded=estado_erro)
 
-        st.markdown(resposta)
+        resposta_stream.markdown(resposta)
         bloco_sql = re.search(r"```sql\s*(.*?)```", resposta, flags=re.IGNORECASE | re.DOTALL)
         if bloco_sql:
             sql_code = bloco_sql.group(1).strip()
@@ -495,4 +701,17 @@ if prompt or arquivos_anexados:
         st.session_state.total_chamadas_mcp += 1
     if modelo_usado:
         st.session_state.ultimo_modelo = modelo_usado
-    st.session_state.messages.append({"role": "model", "content": resposta})
+    st.session_state.messages.append(
+        {
+            "role": "model",
+            "content": resposta,
+            "exchange_id": str(uuid.uuid4()),
+            "prompt": prompt_texto,
+            "dialeto_sql": dialeto_atual,
+            "modelo_usado": modelo_usado,
+            "anexos": [
+                anexo.get("nome", "")
+                for anexo in anexos_payload
+            ],
+        }
+    )

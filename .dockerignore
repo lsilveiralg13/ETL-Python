@@ -3,7 +3,10 @@
 .github
 .vscode
 .gitignore
+.idea/
 .env
+.env.*
+!.env.example
 *.log
 
 # --- Ambientes Virtuais e Cache Python ---
@@ -16,6 +19,33 @@ __pycache__/
 *.pyo
 *.pyd
 .pytest_cache
+.mypy_cache
+.ruff_cache
+.coverage
+htmlcov/
+**/__pycache__/
+**/.pytest_cache/
+**/tests/
+**/test_*.py
+
+# --- Segredos, feedback e arquivos locais ---
+.streamlit/secrets.toml
+**/secrets.toml
+vetra_feedback_*.jsonl
+**/vetra_feedback_*.jsonl
+**/uploads/
+**/user_uploads/
+**/.qdrant/
+utils/*
+!utils/meu_agente_dados/
+!utils/meu_agente_dados/**
+utils/meu_agente_dados/tests/
+utils/meu_agente_dados/test_*.py
+Query_vendas_revisada_DBeaver.sql
+simulador_frete.py
+Automatização GitHub.py
+Criar BAT Vetra.txt
+Recuperador Requirementstxt.py
 
 # --- Pastas de Documentação, Projetos Paralelos e Backups ---
 B.I - Lucas/
