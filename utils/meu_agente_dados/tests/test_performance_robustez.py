@@ -4,6 +4,7 @@ import io
 import json
 import unittest
 import uuid
+from urllib.parse import parse_qs, urlparse
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -13,6 +14,235 @@ from qdrant_client import QdrantClient, models
 
 from core.rag_guard import buscar_conhecimento_rag
 from utils.meu_agente_dados import attachments, feedback, main, servidor_mcp
+
+
+class CopilotAuthTests(unittest.TestCase):
+    def test_oauth_autoriza_apenas_usuario_configurado_e_sessao_expira_no_logout(self):
+        auth = main.github_copilot_auth.__class__()
+        variaveis = {
+            "GITHUB_CLIENT_ID": "client-id",
+            "GITHUB_CLIENT_SECRET": "client-secret",
+            "VETRA_GITHUB_REDIRECT_URI": "https://vetra.example/",
+            "VETRA_GITHUB_ALLOWED_USER": "lucas",
+        }
+
+        class FakeResponse:
+            def __init__(self, data):
+                self.data = data
+
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return self.data
+
+        with (
+            patch.dict("os.environ", variaveis),
+            patch(
+                "utils.meu_agente_dados.copilot_auth.requests.post",
+                return_value=FakeResponse({"access_token": "github-access-token"}),
+            ),
+            patch(
+                "utils.meu_agente_dados.copilot_auth.requests.get",
+                return_value=FakeResponse({"login": "Lucas"}),
+            ),
+        ):
+            authorization_url = auth.create_authorization_url()
+            state = parse_qs(urlparse(authorization_url).query)["state"][0]
+            session_id, login = auth.complete_login("oauth-code", state)
+
+            self.assertEqual(login, "Lucas")
+            self.assertEqual(
+                auth.get_access_token(session_id),
+                ("github-access-token", "Lucas"),
+            )
+            auth.logout(session_id)
+            self.assertIsNone(auth.get_access_token(session_id))
+            with self.assertRaisesRegex(ValueError, "expirou ou já foi utilizado"):
+                auth.complete_login("oauth-code", state)
+
+    def test_oauth_rejeita_usuario_github_nao_autorizado(self):
+        auth = main.github_copilot_auth.__class__()
+        variaveis = {
+            "GITHUB_CLIENT_ID": "client-id",
+            "GITHUB_CLIENT_SECRET": "client-secret",
+            "VETRA_GITHUB_REDIRECT_URI": "https://vetra.example/",
+            "VETRA_GITHUB_ALLOWED_USER": "lucas",
+        }
+
+        class FakeResponse:
+            def __init__(self, data):
+                self.data = data
+
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return self.data
+
+        with (
+            patch.dict("os.environ", variaveis),
+            patch(
+                "utils.meu_agente_dados.copilot_auth.requests.post",
+                return_value=FakeResponse({"access_token": "github-access-token"}),
+            ),
+            patch(
+                "utils.meu_agente_dados.copilot_auth.requests.get",
+                return_value=FakeResponse({"login": "not-lucas"}),
+            ),
+        ):
+            state = parse_qs(
+                urlparse(auth.create_authorization_url()).query
+            )["state"][0]
+            with self.assertRaisesRegex(PermissionError, "não tem acesso"):
+                auth.complete_login("oauth-code", state)
+
+
+class CopilotPromptTests(unittest.TestCase):
+    def test_prompt_preserva_historico_em_ordem_e_pula_roles_invalidos(self):
+        prompt = main.preparar_prompt_copilot(
+            "Pergunta atual",
+            [
+                {"role": "user", "content": "Pergunta anterior"},
+                {"role": "system", "content": "não incluir"},
+                {"role": "assistant", "content": "Resposta anterior"},
+            ],
+        )
+
+        self.assertLess(
+            prompt.index("Pergunta anterior"),
+            prompt.index("Resposta anterior"),
+        )
+        self.assertIn("Usuário: Pergunta atual", prompt)
+        self.assertNotIn("não incluir", prompt)
+
+    def test_prompt_nao_duplica_pergunta_atual_no_historico(self):
+        prompt = main.preparar_prompt_copilot(
+            "Pergunta atual",
+            [
+                {"role": "user", "content": "Pergunta anterior"},
+                {"role": "assistant", "content": "Resposta anterior"},
+                {"role": "user", "content": "Pergunta atual"},
+            ],
+        )
+
+        self.assertEqual(prompt.count("Usuário: Pergunta atual"), 1)
+
+    def test_anexo_de_imagem_vai_como_blob_e_texto_e_extraido(self):
+        imagem = {
+            "nome": "grafico.png",
+            "mime_type": "image/png",
+            "conteudo_b64": base64.b64encode(b"image-data").decode("ascii"),
+        }
+        texto = {
+            "nome": "consulta.txt",
+            "mime_type": "text/plain",
+            "conteudo_b64": base64.b64encode(b"SELECT 1;").decode("ascii"),
+        }
+
+        texto_extraido, imagens = main.preparar_anexos_copilot([imagem, texto])
+
+        self.assertIn("SELECT 1;", texto_extraido)
+        self.assertEqual(imagens[0]["type"], "blob")
+        self.assertEqual(imagens[0]["displayName"], "grafico.png")
+
+    def test_sdk_copilot_usa_somente_ferramentas_mcp_e_retorna_metricas(self):
+        configuracoes = {}
+
+        class FakeSession:
+            def __init__(self):
+                self.rpc = SimpleNamespace(
+                    usage=SimpleNamespace(
+                        get_metrics=self.get_metrics,
+                    )
+                )
+                self.handler = None
+
+            def on(self, handler):
+                self.handler = handler
+
+            async def send_and_wait(self, prompt, **kwargs):
+                configuracoes["prompt"] = prompt
+                configuracoes["attachments"] = kwargs["attachments"]
+                self.handler(
+                    SimpleNamespace(
+                        type="assistant.message_delta",
+                        data=SimpleNamespace(delta_content="Resposta"),
+                    )
+                )
+                self.handler(
+                    SimpleNamespace(
+                        type="tool.execution_start",
+                        data=SimpleNamespace(tool_name="buscar_conhecimento_rag"),
+                    )
+                )
+                await asyncio.sleep(0)
+                return SimpleNamespace(data=SimpleNamespace(content="Resposta final"))
+
+            async def get_metrics(self):
+                return SimpleNamespace(
+                    total_nano_aiu=1_250_000_000,
+                    model_metrics={
+                        "gpt-5.4": SimpleNamespace(
+                            usage=SimpleNamespace(
+                                input_tokens=120,
+                                output_tokens=30,
+                            )
+                        )
+                    },
+                )
+
+        class FakeClient:
+            def __init__(self, **kwargs):
+                configuracoes["client"] = kwargs
+
+            async def start(self):
+                return None
+
+            async def create_session(self, **kwargs):
+                configuracoes["session"] = kwargs
+                return FakeSession()
+
+            async def stop(self):
+                return None
+
+        eventos = []
+
+        async def publicar_evento(evento):
+            eventos.append(evento)
+
+        async def executar():
+            with (
+                patch("copilot.CopilotClient", FakeClient),
+                patch.object(main, "criar_env_subprocesso", return_value={}),
+            ):
+                return await main.processar_com_copilot(
+                    "Pergunta",
+                    [],
+                    "PostgreSQL",
+                    [],
+                    "github-token",
+                    main.MCPRuntime(),
+                    publicar_evento,
+                )
+
+        resultado = asyncio.run(executar())
+
+        self.assertEqual(resultado, ("Resposta final", "gpt-5.4", True, None))
+        self.assertEqual(configuracoes["client"]["mode"], "empty")
+        self.assertFalse(configuracoes["client"]["use_logged_in_user"])
+        self.assertEqual(
+            configuracoes["session"]["available_tools"],
+            ["mcp:*"],
+        )
+        self.assertEqual(
+            configuracoes["session"]["mcp_servers"]["vetra"]["tools"],
+            ["*"],
+        )
+        uso = next(evento for evento in eventos if evento["type"] == "usage")
+        self.assertEqual(uso["ai_credits"], 1.25)
+        self.assertEqual(uso["input_tokens"], 120)
+        self.assertEqual(uso["output_tokens"], 30)
 
 
 class CacheTests(unittest.TestCase):

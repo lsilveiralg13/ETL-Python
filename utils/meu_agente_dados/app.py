@@ -1,4 +1,3 @@
-import asyncio
 import json
 import logging
 import os
@@ -35,9 +34,6 @@ RAW_API_URL = os.environ.get("VETRA_API_URL", "http://127.0.0.1:8000").strip()
 RAW_API_URL = RAW_API_URL.replace("0.0.0.0", "127.0.0.1")
 API_BASE_URL = re.sub(r"/(chat|chat/stream)/?$", "", RAW_API_URL).rstrip("/")
 
-PRECO_INPUT_1M = 0.075
-PRECO_OUTPUT_1M = 0.30
-TAXA_CAMBIO_USD_BRL = 5.60
 MAX_TEXTO_RAG = min(
     int(os.environ.get("VETRA_MAX_TEXTO_RAG", 90_000)),
     90_000,
@@ -51,12 +47,6 @@ if min(MAX_TOTAL_UPLOAD_BYTES, MAX_ATTACHMENTS) < 1:
     raise ValueError("Os limites de upload da Vetra devem ser maiores que zero.")
 HTTP_TIMEOUT = (5, 60)
 logger = logging.getLogger("vetra.streamlit")
-
-MODELOS_PREFERENCIA = [
-    "gemini-3.8-flash",
-    "gemini-3.1-pro-preview",
-    "gemini-3-flash-preview",
-]
 
 CATALOGO_FERRAMENTAS = [
     {"nome": "validar_e_executar_sql", "descricao": "Valida via AST e schema; não executa no banco"},
@@ -85,18 +75,9 @@ SUGESTOES_INICIAIS = [
 ]
 
 
-def obter_chave_gemini_segura() -> str:
-    valor_env = os.environ.get("GEMINI_API_KEY")
-    if valor_env:
-        return valor_env
-    try:
-        return str(st.secrets.get("GEMINI_API_KEY", ""))
-    except Exception:
-        return ""
-
-
 if "preferencias_usuario" not in st.session_state:
     st.session_state.preferencias_usuario = {
+        "provider": "copilot",
         "dialeto_sql": "PostgreSQL",
         "departamento": "Engenharia de Dados",
         "temperatura": 0.2,
@@ -117,6 +98,8 @@ for chave, valor in {
     "total_tokens_input": 0,
     "total_tokens_output": 0,
     "custo_acumulado_usd": 0.0,
+    "total_copilot_ai_credits": 0.0,
+    "copilot_last_ai_credits": 0.0,
 }.items():
     if chave not in st.session_state:
         st.session_state[chave] = valor
@@ -166,28 +149,13 @@ def analisar_explain_plan_sql(sql_query: str) -> list[str]:
     return alertas
 
 
-try:
-    from utils.meu_agente_dados.main import processar_mcp_e_llm
-    HAS_LOCAL_ORCHESTRATOR = True
-except Exception:
-    processar_mcp_e_llm = None
-    HAS_LOCAL_ORCHESTRATOR = False
-    logger.exception("Não foi possível carregar o orquestrador local da Vetra.")
-
-
-def executar_corrotina(corrotina):
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        return asyncio.run(corrotina)
-    raise RuntimeError("Já existe um loop assíncrono ativo; use o backend HTTP para esta execução.")
-
-
 def chamar_api_backend(
     prompt: str,
     historico: list,
     dialeto_sql: str,
     temperatura: float,
+    provider: str,
+    access_token: str,
     anexos: Optional[list] = None,
     on_event: Optional[Callable[[dict[str, Any]], None]] = None,
 ):
@@ -208,18 +176,24 @@ def chamar_api_backend(
         "prompt": prompt,
         "historico": historico_formatado,
         "anexos": anexos or [],
+        "provider": provider,
         "dialeto_sql": dialeto_sql,
         "temperatura": max(0.0, min(2.0, float(temperatura))),
     }
     erros_http = []
     stream_iniciado = False
     stream_concluido = False
+    headers = {
+        "Accept": "text/event-stream",
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {access_token}",
+    }
 
     try:
         with requests.post(
             f"{API_BASE_URL}/chat/stream",
             json=payload,
-            headers={"Accept": "text/event-stream", "Content-Type": "application/json"},
+            headers=headers,
             stream=True,
             timeout=HTTP_TIMEOUT,
         ) as response:
@@ -301,7 +275,7 @@ def chamar_api_backend(
         with requests.post(
             f"{API_BASE_URL}/chat",
             json=payload,
-            headers={"Content-Type": "application/json"},
+            headers={**headers, "Accept": "application/json"},
             timeout=HTTP_TIMEOUT,
         ) as response:
             if response.ok:
@@ -315,29 +289,6 @@ def chamar_api_backend(
                 erros_http.append(f"chat HTTP {response.status_code}")
     except (requests.RequestException, ValueError) as erro:
         erros_http.append(f"chat: {erro}")
-
-    if HAS_LOCAL_ORCHESTRATOR and processar_mcp_e_llm is not None:
-        try:
-            async def publicar_evento_local(evento: dict[str, Any]) -> None:
-                if on_event is not None:
-                    on_event(evento)
-
-            resposta, modelo_usado, mcp_chamado, retorno_mcp = executar_corrotina(
-                processar_mcp_e_llm(
-                    prompt,
-                    historico_formatado,
-                    dialeto_sql,
-                    temperatura,
-                    anexos or [],
-                    on_event=publicar_evento_local,
-                )
-            )
-            modelo_exibicao = (
-                f"{modelo_usado} (In-Memory)" if modelo_usado else None
-            )
-            return str(resposta), modelo_exibicao, bool(mcp_chamado), retorno_mcp
-        except Exception as erro:
-            return f"❌ Erro na execução nativa do agente: {erro}", None, False, None
 
     detalhe = "; ".join(erros_http[-2:])
     sufixo = f" Detalhes: {detalhe}" if detalhe else ""
@@ -444,6 +395,119 @@ st.markdown(
 )
 
 
+if "copilot_session_token" not in st.session_state:
+    st.session_state.copilot_session_token = None
+
+if "code" in st.query_params or "error" in st.query_params:
+    oauth_code = str(st.query_params.get("code", ""))
+    oauth_state = str(st.query_params.get("state", ""))
+    oauth_error = str(st.query_params.get("error_description") or st.query_params.get("error") or "")
+    st.query_params.clear()
+    if oauth_error:
+        st.session_state.github_auth_error = "O login do GitHub foi cancelado ou recusado."
+    elif oauth_code and oauth_state:
+        try:
+            callback_response = requests.post(
+                f"{API_BASE_URL}/auth/github/callback",
+                json={"code": oauth_code, "state": oauth_state},
+                timeout=(5, 20),
+            )
+            callback_response.raise_for_status()
+            callback_data = callback_response.json()
+            st.session_state.copilot_session_token = callback_data["session_token"]
+            st.session_state.github_login = callback_data["login"]
+            st.session_state.pop("github_auth_error", None)
+        except (requests.RequestException, ValueError, KeyError) as erro:
+            logger.warning("Falha ao finalizar o login GitHub: %s", erro)
+            st.session_state.github_auth_error = (
+                "Não foi possível concluir o login do GitHub. Tente entrar novamente."
+            )
+
+auth_status = st.session_state.get("github_auth_status")
+if auth_status is None:
+    try:
+        resposta_status = requests.get(
+            f"{API_BASE_URL}/auth/github/status",
+            timeout=HTTP_TIMEOUT,
+        )
+        resposta_status.raise_for_status()
+        auth_status = resposta_status.json()
+        st.session_state.github_auth_status = auth_status
+    except (requests.RequestException, ValueError) as erro:
+        logger.warning("Não foi possível consultar a configuração de autenticação.")
+        st.error(
+            "Não foi possível conectar ao backend da Vetra para verificar o login. "
+            "Recarregue a página ou tente novamente mais tarde."
+        )
+        st.stop()
+
+copilot_session_token = st.session_state.copilot_session_token
+github_login = st.session_state.get("github_login")
+if copilot_session_token:
+    try:
+        resposta_usuario = requests.get(
+            f"{API_BASE_URL}/auth/github/me",
+            headers={"Authorization": f"Bearer {copilot_session_token}"},
+            timeout=HTTP_TIMEOUT,
+        )
+        if resposta_usuario.status_code == 401:
+            st.session_state.pop("copilot_session_token", None)
+            st.session_state.pop("github_login", None)
+            copilot_session_token = None
+        else:
+            resposta_usuario.raise_for_status()
+            github_login = resposta_usuario.json()["login"]
+            st.session_state.github_login = github_login
+    except (requests.RequestException, ValueError, KeyError) as erro:
+        logger.warning("Não foi possível validar a sessão GitHub da Vetra: %s", erro)
+        st.error("Não foi possível validar sua sessão. Recarregue a página.")
+        st.stop()
+
+if not copilot_session_token:
+    st.markdown(
+        '<div class="vt-welcome"><div class="vt-kicker">'
+        '◆ &nbsp; ACESSO PRIVADO</div>'
+        '<h2>Entre para continuar.</h2>'
+        '<p>A Vetra está configurada para uso pessoal e aceita somente a conta '
+        'GitHub autorizada.</p></div>',
+        unsafe_allow_html=True,
+    )
+    if st.session_state.get("github_auth_error"):
+        st.error(st.session_state.github_auth_error)
+    if not auth_status.get("configured"):
+        st.error(
+            "O login ainda não foi configurado no backend. Configure "
+            "`GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, "
+            "`VETRA_GITHUB_REDIRECT_URI` e `VETRA_GITHUB_ALLOWED_USER` "
+            "como secrets/variáveis no Fly.io."
+        )
+    else:
+        try:
+            resposta_login = requests.get(
+                f"{API_BASE_URL}/auth/github/start",
+                timeout=HTTP_TIMEOUT,
+            )
+            resposta_login.raise_for_status()
+            st.link_button(
+                "Entrar com GitHub",
+                resposta_login.json()["authorization_url"],
+                icon=":material/login:",
+                width="stretch",
+            )
+        except (requests.RequestException, ValueError, KeyError) as erro:
+            logger.warning("Não foi possível iniciar o login GitHub: %s", erro)
+            st.error("Não foi possível iniciar o login. Tente novamente.")
+    st.stop()
+
+if st.session_state.get("provider_model_cache") is None:
+    st.session_state.provider_model_cache = {
+        "copilot_model": auth_status.get("copilot_model", "gpt-5.4"),
+        "copilot_max_ai_credits_per_request": auth_status.get(
+            "copilot_max_ai_credits_per_request", 5
+        ),
+    }
+
+
 with st.sidebar:
     st.markdown(
         '<div class="vt-brand"><div class="vt-mark">V</div><div>'
@@ -451,12 +515,28 @@ with st.sidebar:
         '<h1>Vetra</h1><p>Seu espaço de análise</p></div></div>',
         unsafe_allow_html=True,
     )
-    gemini_configurada = bool(obter_chave_gemini_segura())
     st.badge(
-        "Credencial Gemini detectada" if gemini_configurada else "Modo backend",
+        f"GitHub conectado · {github_login}",
         icon=":material/circle:",
-        color="green" if gemini_configurada else "blue",
+        color="green",
     )
+    if st.button(
+        "Sair da conta GitHub",
+        icon=":material/logout:",
+        type="tertiary",
+        width="stretch",
+    ):
+        try:
+            requests.post(
+                f"{API_BASE_URL}/auth/github/logout",
+                headers={"Authorization": f"Bearer {copilot_session_token}"},
+                timeout=HTTP_TIMEOUT,
+            )
+        except requests.RequestException:
+            logger.warning("Não foi possível encerrar a sessão no backend.")
+        st.session_state.pop("copilot_session_token", None)
+        st.session_state.pop("github_login", None)
+        st.rerun()
 
     registros_feedback = st.session_state.feedback_fine_tuning
     if st.session_state.feedback_notice:
@@ -525,6 +605,40 @@ with st.sidebar:
                 st.error(f"Não foi possível ler o arquivo: {erro}")
 
     with st.expander("Preferências", icon=":material/tune:", expanded=False):
+        provedores = (
+            ["GitHub Copilot", "Gemini"]
+            if auth_status.get("gemini_configured")
+            else ["GitHub Copilot"]
+        )
+        provider_labels = {
+            "GitHub Copilot": "copilot",
+            "Gemini": "gemini",
+        }
+        provider_atual = st.session_state.preferencias_usuario.get(
+            "provider", "copilot"
+        )
+        provider_padrao = next(
+            (
+                rotulo
+                for rotulo, valor in provider_labels.items()
+                if valor == provider_atual and rotulo in provedores
+            ),
+            provedores[0],
+        )
+        st.session_state.preferencias_usuario["provider"] = provider_labels[
+            st.selectbox(
+                "Provedor de IA",
+                provedores,
+                index=provedores.index(provider_padrao),
+            )
+        ]
+        if st.session_state.preferencias_usuario["provider"] == "copilot":
+            st.caption(
+                f"Modelo: `{st.session_state.provider_model_cache['copilot_model']}` · "
+                f"limite suave de "
+                f"{st.session_state.provider_model_cache['copilot_max_ai_credits_per_request']} "
+                "AI Credits por consulta."
+            )
         dialetos = ["PostgreSQL", "Databricks SQL", "MySQL", "BigQuery", "Oracle"]
         atual = st.session_state.preferencias_usuario.get(
             "dialeto_sql", "PostgreSQL"
@@ -775,6 +889,7 @@ if (prompt or arquivos_anexados) and not erros_anexos:
             "caracteres_pendentes": 0,
             "ultima_atualizacao": time.monotonic(),
             "houve_renderizacao": False,
+            "uso": None,
         }
         with st.status(
             ":material/auto_awesome: Consultando seus dados",
@@ -825,12 +940,23 @@ if (prompt or arquivos_anexados) and not erros_anexos:
                         estado_stream["caracteres_pendentes"] = 0
                         estado_stream["ultima_atualizacao"] = agora
                         estado_stream["houve_renderizacao"] = True
+                elif tipo_evento == "usage":
+                    creditos = float(evento.get("ai_credits", 0) or 0)
+                    estado_stream["uso"] = {
+                        "ai_credits": creditos,
+                        "input_tokens": int(evento.get("input_tokens", 0) or 0),
+                        "output_tokens": int(evento.get("output_tokens", 0) or 0),
+                    }
+                    st.session_state.copilot_last_ai_credits = creditos
+                    st.session_state.total_copilot_ai_credits += creditos
 
             resposta, modelo_usado, mcp_chamado, retorno_mcp = chamar_api_backend(
                 prompt_texto,
                 historico_copia,
                 dialeto_atual,
                 temp_atual,
+                st.session_state.preferencias_usuario.get("provider", "copilot"),
+                copilot_session_token,
                 anexos_payload,
                 on_event=atualizar_progresso,
             )
@@ -844,6 +970,15 @@ if (prompt or arquivos_anexados) and not erros_anexos:
                 ),
                 state="error" if estado_erro else "complete",
                 expanded=estado_erro,
+            )
+        if estado_stream["uso"] is not None:
+            st.caption(
+                f"Esta consulta: {estado_stream['uso']['ai_credits']:.6f} "
+                "GitHub AI Credits · "
+                f"{estado_stream['uso']['input_tokens']:,} tokens de entrada · "
+                f"{estado_stream['uso']['output_tokens']:,} tokens de saída · "
+                f"total nesta sessão: "
+                f"{st.session_state.total_copilot_ai_credits:.6f} credits"
             )
 
         if resposta.startswith("❌"):

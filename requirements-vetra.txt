@@ -29,3 +29,4 @@ fastapi-cli
 uvicorn
 sse-starlette
 python-dotenv
+github-copilot-sdk==1.0.25

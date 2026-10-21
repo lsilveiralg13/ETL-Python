@@ -1,6 +1,6 @@
 # 🤖 Vetra — Agente Consultivo de Dados & GenAI (Enterprise Platform)
 
-A **Vetra** é uma plataforma consultiva de inteligência de dados desenvolvida para atuar como assistente de Engenharia de Dados e BI. Ela combina arquitetura desacoplada via **Model Context Protocol (MCP)**, busca semântica **RAG no Qdrant Cloud**, validação de segurança **SQL AST (Schema-Aware)** e **resiliência com fallback multi-modelo** usando a Google Gemini API.
+A **Vetra** é uma plataforma consultiva de inteligência de dados desenvolvida para atuar como assistente de Engenharia de Dados e BI. Ela combina arquitetura desacoplada via **Model Context Protocol (MCP)**, busca semântica **RAG no Qdrant Cloud**, validação de segurança **SQL AST (Schema-Aware)** e os provedores de LLM Google Gemini e GitHub Copilot.
 
 ---
 
@@ -8,8 +8,10 @@ A **Vetra** é uma plataforma consultiva de inteligência de dados desenvolvida 
 
 ```mermaid
 graph TD
-    A[🧑‍💻 Usuário / Analytics UI] -->|Prompt Sanitizado & PII Masking| B[Streamlit App - app.py]
-    B -->|Model Context Protocol - stdio| C[Servidor MCP - servidor_mcp.py]
+    A[🧑‍💻 Usuário autenticado] --> B[Streamlit App - app.py]
+    B -->|HTTPS interno autenticado| C[FastAPI - main.py]
+    C -->|Gemini API ou Copilot SDK| G[Provedor LLM]
+    C -->|Model Context Protocol - stdio| D[Servidor MCP - servidor_mcp.py]
     
     subgraph "Subprocesso & Engine MCP"
         C -->|Busca Semântica Híbrida| D[(Qdrant Cloud Vector DB)]
@@ -17,8 +19,6 @@ graph TD
         C -->|Cálculo de Indicadores| F[Métricas BI - OTIF / Lead Time]
     end
     
-    B -->|Orquestração de Fallback 503/429| G[Google Gemini API]
-    G -->|gemini-3-flash / gemini-2.5-flash| B
     B -->|Exportação de Relatórios| H[Excel / CSV / Markdown]
 ```
 
@@ -44,6 +44,9 @@ graph TD
 * O seletor inclui Oracle SQL: a ferramenta usa o parser Oracle do SQLGlot, valida nomes de objetos sem diferenciar maiúsculas/minúsculas, aceita owner/schema e DUAL, reconhece pseudocolunas comuns e aplica limite de resultados. Não há conexão nem execução em Oracle.
 * Anexos aceitam imagens, PDF, Office, código/configuração, dados tabulares e formatos multimodais comuns de áudio/vídeo. Office, código e dados tabulares são extraídos para texto com limites; imagens/PDF digitalizados podem usar OCR se Tesseract estiver instalado. Arquivos desconhecidos, executáveis e compactados são rejeitados.
 * Feedback 👍/👎 com correção pode ser exportado como JSONL para curadoria. Os dados ficam apenas na sessão do Streamlit até serem baixados; não há treinamento automático. Revise conteúdo sensível antes de compartilhar.
+* O login GitHub autoriza apenas o usuário definido em `VETRA_GITHUB_ALLOWED_USER`; o token Copilot fica apenas na memória do backend e não é enviado ao navegador. O Copilot SDK roda em modo isolado e só recebe as ferramentas MCP da Vetra, sem ferramentas locais de shell/arquivos.
+* O Copilot SDK envia anexos de imagem como blobs e extrai PDF/documentos suportados como texto. Formatos multimodais sem extração textual podem não ser aceitos pelo Copilot; Gemini continua disponível quando configurado.
+* O painel exibe créditos AI retornados pelo SDK por consulta e acumula a soma na sessão atual da interface. O limite `VETRA_COPILOT_MAX_AI_CREDITS_PER_REQUEST` é suave por consulta (a resposta em andamento pode ultrapassá-lo); confira o painel de cobrança do GitHub para o saldo oficial.
 
 ### Interface Streamlit
 
@@ -57,6 +60,9 @@ graph TD
 * A imagem instala Tesseract com idiomas português e inglês. Em ambientes não Docker, OCR exige que Tesseract e os dados dos idiomas configurados em `VETRA_OCR_LANG` estejam instalados.
 * O limite do Streamlit é 10 MiB por arquivo; os limites de API são 10 MiB por arquivo e 25 MiB total por requisição. Ajuste `STREAMLIT_SERVER_MAXUPLOADSIZE`, `VETRA_MAX_UPLOAD_BYTES`, `VETRA_MAX_ATTACHMENT_BYTES` e `VETRA_MAX_TOTAL_ATTACHMENT_BYTES` em conjunto ao mudar os valores.
 * O Fly.io executa verificações de saúde separadas para Streamlit e FastAPI. Credenciais devem ser configuradas com `fly secrets set`; não as inclua em `[env]`, `.env` enviado ao repositório ou na imagem.
+* O callback GitHub está definido como `https://vetra-data-agent.fly.dev/`. Crie uma OAuth App no GitHub com essa URL como homepage e callback, depois configure os secrets no Fly: `fly secrets set GITHUB_CLIENT_ID="<client-id>" GITHUB_CLIENT_SECRET="<client-secret>" VETRA_GITHUB_ALLOWED_USER="<seu-login-github>"`.
+* A sessão OAuth dura 12 horas e é mantida em memória no backend; após reinício do backend, entre novamente. Mantenha uma única máquina do processo `backend`, pois as sessões não são compartilhadas entre máquinas. O site permanece acessível publicamente, mas apenas o login GitHub permitido pode usar a Vetra.
+* O modelo Copilot padrão é `gpt-5.4`; `VETRA_COPILOT_MODEL` e `VETRA_COPILOT_MAX_AI_CREDITS_PER_REQUEST` podem ser definidos no Fly. A imagem baixa e valida durante o build o runtime do Copilot SDK.
 
 Configurações adicionais do backend (todas opcionais):
 
@@ -65,6 +71,7 @@ Configurações adicionais do backend (todas opcionais):
 * `VETRA_MAX_RAG_DOCUMENT_CHARS` (200000), `VETRA_MAX_PDF_PAGES` (500).
 * `VETRA_MAX_UPLOAD_BYTES` (10 MiB), `VETRA_MAX_ATTACHMENTS` (10), `VETRA_MAX_ATTACHMENT_TEXT_CHARS` (100000), `VETRA_MAX_TEXTO_RAG` (90000) e `VETRA_OCR_LANG` (`por+eng`). O dataset de feedback fica limitado a 200 registros por sessão.
 * `VETRA_RAG_DEPARTMENT` (TI) e `VETRA_RAG_ACCESS_LEVEL` (1) definem a identidade de acesso do worker MCP. Em ambientes multiusuário, a identidade deve ser vinculada à autenticação do usuário, não ampliada via argumentos do LLM.
+* `VETRA_COPILOT_MODEL` (`gpt-5.4`) define o modelo Copilot; `VETRA_COPILOT_MAX_AI_CREDITS_PER_REQUEST` (`5`) define o limite suave de créditos por sessão de consulta.
 
 [v1.2.0] — 2026-09-28
 
