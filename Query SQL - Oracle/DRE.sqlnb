@@ -1,0 +1,281 @@
+cells:
+  - kind: 2
+    value: "WITH CTE_PARAMETROS AS (\r
+
+      \    SELECT '2026-09' AS MES_ANO FROM DUAL\r
+
+      ),\r
+
+      CTE_VENDAS AS (\r
+
+      \    SELECT\r
+
+      \        TO_CHAR(V.DATA_FATURAMENTO,'YYYY-MM') AS MES_ANO,\r
+
+      \        SUM(NVL(V.VLTOTAL_NF,0)) AS ROB_BRUTA,\r
+
+      \        COUNT(DISTINCT V.NUM_NFE_VENDA) AS QTD_NOTAS,\r
+
+      \        SUM(NVL(V.PIS_NF,0)+NVL(V.ICMS_NF,0)+NVL(V.COFINS_NF,0)+NVL(V.IC\
+      MS_PARTILHA_NF,0)+NVL(V.ICMS_ST_NF,0)+NVL(V.ST_FCP_NF,0)+NVL(V.FCP_NF,0)+\
+      NVL(V.ST17_NF,0)) AS TOTAL_IMPOSTOS,\r
+
+      \        SUM(NVL(V.CMV_CONTABIL,0)) AS CMV_CONTABIL,\r
+
+      \        SUM(NVL(V.BONUSSELLOUT,0)) AS VERBA_SELLOUT,\r
+
+      \        -- Desdobramento de Frete (CTE)\r
+
+      \        -- CIF (Cost, Insurance and Freight - A FRIOPEÇAS paga o frete,
+      ou seja, Frete Grátis)\r
+
+      \        -- FOB (Free On Board - O cliente paga o frete, ou seja, frete
+      consolidado no ato da compra)\r
+
+      \        SUM(NVL(V.VALOR_CTE_LIQUIDO,0)) AS CTE_TOTAL,\r
+
+      \        SUM(CASE WHEN UPPER(TRIM(V.TIPO_FRETE)) IN ('CIF', 'C', '1') THEN
+      NVL(V.VALOR_CTE_LIQUIDO,0) ELSE 0 END) AS CTE_CIF,\r
+
+      \        SUM(CASE WHEN UPPER(TRIM(V.TIPO_FRETE)) IN ('FOB', 'F', '0') THEN
+      NVL(V.VALOR_CTE_LIQUIDO,0) ELSE 0 END) AS CTE_FOB,\r
+
+      \r
+
+      \        SUM(CASE\r
+
+      \            WHEN UPPER(TRIM(V.MARCA)) IN
+      ('WHIRLPOOL','BRASTEMP','CONSUL','EMBRACO')\r
+
+      \            THEN NVL(V.VLTOTAL_NF,0)*0.0401\r
+
+      \            ELSE 0\r
+
+      \        END) AS TAXA_VENDOR,\r
+
+      \        SUM(CASE\r
+
+      \            WHEN TO_CHAR(V.ID_CENTRO) IN ('1005','1013','1017','1023')\r
+
+      \            THEN NVL(V.VLTOTAL_NF,0)*0.0266\r
+
+      \            ELSE 0\r
+
+      \        END) AS BENEFICIO_FISCAL,\r
+
+      \        SUM(CASE\r
+
+      \            WHEN TO_CHAR(V.ID_ESC_VENDAS)='1009'\r
+
+      \            THEN NVL(V.VLTOTAL_NF,0)*0.0242\r
+
+      \            ELSE 0\r
+
+      \        END) AS COMISSAO_OFF\r
+
+      \    FROM FRIOPECASBI.BASE_VENDAS V\r
+
+      \    WHERE NVL(V.ESTORNO,'N')<>'S'\r
+
+      \      AND TO_CHAR(V.DATA_FATURAMENTO,'YYYY-MM') IN (SELECT P.MES_ANO FROM
+      CTE_PARAMETROS P)\r
+
+      \    GROUP BY TO_CHAR(V.DATA_FATURAMENTO,'YYYY-MM')\r
+
+      ),\r
+
+      CTE_DEVOLUCAO AS (\r
+
+      \    SELECT\r
+
+      \        TO_CHAR(D.DATA_FORMATADA, 'YYYY-MM') AS MES_ANO,\r
+
+      \        SUM(NVL(D.VLTOTAL_NF, 0)) AS TOTAL_DEVOLUCAO\r
+
+      \    FROM FRIOPECASBI.BASE_DEVOLUCAO D\r
+
+      \    WHERE NVL(D.ESTORNO_DEV,'N')<>'S'\r
+
+      \      AND TO_CHAR(D.DATA_FORMATADA, 'YYYY-MM') IN (SELECT P.MES_ANO FROM
+      CTE_PARAMETROS P)\r
+
+      \    GROUP BY TO_CHAR(D.DATA_FORMATADA, 'YYYY-MM')\r
+
+      ),\r
+
+      CTE_COMISSOES AS (\r
+
+      \    SELECT\r
+
+      \        TO_CHAR(H.DATA,'YYYY-MM') AS MES_ANO,\r
+
+      \        SUM(NVL(H.COMISSAO,0)) AS COMISSAO_CONTRATUAL,\r
+
+      \        SUM(NVL(H.RB,0)+NVL(H.RBLJTD,0)+NVL(H.PR,0)+NVL(H.PRLJTD,0)+NVL(\
+      H.COND_CALC_MKTP,0)+NVL(H.CONDICIONAL_MKTP,0)+NVL(H.CUPOM_MKTP,0)+NVL(H.F\
+      RETE_MKTP,0)) AS TOTAL_REBATES\r
+
+      \    FROM FRIOPECASBI.HIST_VENDAS H\r
+
+      \    WHERE TO_CHAR(H.DATA,'YYYY-MM') IN (SELECT '2026-10' FROM DUAL)\r
+
+      \    GROUP BY TO_CHAR(H.DATA,'YYYY-MM')\r
+
+      ),\r
+
+      CTE_CONSOLIDADO AS (\r
+
+      \    SELECT\r
+
+      \        V.MES_ANO,\r
+
+      \        V.ROB_BRUTA,\r
+
+      \        V.QTD_NOTAS,\r
+
+      \        NVL(D.TOTAL_DEVOLUCAO,0) AS DEVOLUCAO,\r
+
+      \        V.TOTAL_IMPOSTOS,\r
+
+      \        (V.ROB_BRUTA - NVL(D.TOTAL_DEVOLUCAO,0) - V.TOTAL_IMPOSTOS) AS
+      ROL,\r
+
+      \        (V.CMV_CONTABIL - V.VERBA_SELLOUT + V.TAXA_VENDOR) AS
+      CUSTO_TOTAL,\r
+
+      \        V.BENEFICIO_FISCAL,\r
+
+      \        (NVL(C.COMISSAO_CONTRATUAL,0) - NVL(C.TOTAL_REBATES,0) +
+      V.COMISSAO_OFF) AS COMISSAO_LIQUIDA,\r
+
+      \        V.CTE_TOTAL,\r
+
+      \        V.CTE_CIF,\r
+
+      \        V.CTE_FOB\r
+
+      \    FROM CTE_VENDAS V\r
+
+      \    LEFT JOIN CTE_DEVOLUCAO D ON D.MES_ANO = V.MES_ANO\r
+
+      \    LEFT JOIN CTE_COMISSOES C ON C.MES_ANO = V.MES_ANO\r
+
+      ),\r
+
+      CTE_DRE_FINAL AS (\r
+
+      \    SELECT B.*,\r
+
+      \        (B.ROL - B.CUSTO_TOTAL + B.BENEFICIO_FISCAL) AS MARGEM_BRUTA,\r
+
+      \        (B.ROL - B.CUSTO_TOTAL + B.BENEFICIO_FISCAL - B.COMISSAO_LIQUIDA
+      - B.CTE_CIF) AS MARGEM_CONTRIBUICAO\r
+
+      \    FROM CTE_CONSOLIDADO B\r
+
+      ),\r
+
+      CTE_DRE_VERTICAL AS (\r
+
+      \    SELECT MES_ANO, 1 AS ORDEM, '(+) 1. RECEITA OPERACIONAL BRUTA' AS
+      CONTA_DRE, ROB_BRUTA AS VALOR, ROL, 'MOEDA' AS TIPO FROM CTE_DRE_FINAL\r
+
+      \    UNION ALL\r
+
+      \    SELECT MES_ANO, 2, '    (-) Devoluções', -DEVOLUCAO, ROL, 'MOEDA'
+      FROM CTE_DRE_FINAL\r
+
+      \    UNION ALL\r
+
+      \    SELECT MES_ANO, 3, '    (-) Impostos sobre Vendas', -TOTAL_IMPOSTOS,
+      ROL, 'MOEDA' FROM CTE_DRE_FINAL\r
+
+      \    UNION ALL\r
+
+      \    SELECT MES_ANO, 4, '(=) 2. RECEITA OPERACIONAL LÍQUIDA (ROL)', ROL,
+      ROL, 'MOEDA' FROM CTE_DRE_FINAL\r
+
+      \    UNION ALL\r
+
+      \    SELECT MES_ANO, 5, '    (-) Custo das Mercadorias (CMV Líquido)',
+      -CUSTO_TOTAL, ROL, 'MOEDA' FROM CTE_DRE_FINAL\r
+
+      \    UNION ALL\r
+
+      \    SELECT MES_ANO, 6, '    (+) Benefício Fiscal', BENEFICIO_FISCAL, ROL,
+      'MOEDA' FROM CTE_DRE_FINAL\r
+
+      \    UNION ALL\r
+
+      \    SELECT MES_ANO, 7, '(=) 3. MARGEM BRUTA', MARGEM_BRUTA, ROL, 'MOEDA'
+      FROM CTE_DRE_FINAL\r
+
+      \    UNION ALL\r
+
+      \    SELECT MES_ANO, 8, '    (-) Comissões Líquidas', -COMISSAO_LIQUIDA,
+      ROL, 'MOEDA' FROM CTE_DRE_FINAL\r
+
+      \    UNION ALL\r
+
+      \    SELECT MES_ANO, 9, '    (-) Logística e Frete (CTE TOTAL)',
+      -CTE_TOTAL, ROL, 'MOEDA' FROM CTE_DRE_FINAL\r
+
+      \    UNION ALL\r
+
+      \    SELECT MES_ANO, 9.1, '        [ Frete CIF - Conta Frio Peças ]',
+      -CTE_CIF, ROL, 'MOEDA' FROM CTE_DRE_FINAL\r
+
+      \    UNION ALL\r
+
+      \    SELECT MES_ANO, 9.2, '        [ Frete FOB - Conta Cliente ]',
+      -CTE_FOB, ROL, 'MOEDA' FROM CTE_DRE_FINAL\r
+
+      \    UNION ALL\r
+
+      \    SELECT MES_ANO, 10, '(=) 4. MARGEM DE CONTRIBUIÇÃO',
+      MARGEM_CONTRIBUICAO, ROL, 'MOEDA' FROM CTE_DRE_FINAL\r
+
+      \    UNION ALL\r
+
+      \    SELECT MES_ANO, 11, '    (i) Ticket Médio (ROB / Qtd Notas)', CASE
+      WHEN QTD_NOTAS > 0 THEN ROB_BRUTA/QTD_NOTAS ELSE 0 END, ROL, 'MOEDA' FROM
+      CTE_DRE_FINAL\r
+
+      \    UNION ALL\r
+
+      \    SELECT MES_ANO, 12, '    (i) % Frete CIF sobre ROL', CASE WHEN ROL <>
+      0 THEN (CTE_CIF/ROL)*100 ELSE 0 END, ROL, 'PERCENTUAL' FROM
+      CTE_DRE_FINAL\r
+
+      )\r
+
+      SELECT\r
+
+      \    MES_ANO AS \"PERÍODO\",\r
+
+      \    CONTA_DRE AS \"RUBRICA DRE\",\r
+
+      \    CASE \r
+
+      \        WHEN TIPO = 'MOEDA' THEN 'R$
+      '||TO_CHAR(VALOR,'FM999G999G999G990D00','NLS_NUMERIC_CHARACTERS='',.''')\r
+
+      \        ELSE
+      TO_CHAR(VALOR,'FM990D00','NLS_NUMERIC_CHARACTERS='',.''')||'%'\r
+
+      \    END AS \"VALOR\",\r
+
+      \    CASE\r
+
+      \        WHEN ROL<>0 AND TIPO = 'MOEDA' THEN
+      TO_CHAR(ROUND((VALOR/ROL)*100,2),'FM999G990D00','NLS_NUMERIC_CHARACTERS='\
+      ',.''')||'%'\r
+
+      \        ELSE '-'\r
+
+      \    END AS \"% S/ ROL\"\r
+
+      FROM CTE_DRE_VERTICAL\r
+
+      ORDER BY MES_ANO, ORDEM;"
+    languageId: oracle-sql

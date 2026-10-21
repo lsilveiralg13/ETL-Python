@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import re
+import time
 import uuid
 from datetime import datetime
 from typing import Any, Callable, Optional
@@ -27,7 +28,7 @@ st.set_page_config(
     page_title="Vetra — Agente Consultivo de Dados",
     page_icon="◆",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",
 )
 
 RAW_API_URL = os.environ.get("VETRA_API_URL", "http://127.0.0.1:8000").strip()
@@ -331,7 +332,10 @@ def chamar_api_backend(
                     on_event=publicar_evento_local,
                 )
             )
-            return str(resposta), f"{modelo_usado} (In-Memory)", bool(mcp_chamado), retorno_mcp
+            modelo_exibicao = (
+                f"{modelo_usado} (In-Memory)" if modelo_usado else None
+            )
+            return str(resposta), modelo_exibicao, bool(mcp_chamado), retorno_mcp
         except Exception as erro:
             return f"❌ Erro na execução nativa do agente: {erro}", None, False, None
 
@@ -340,148 +344,316 @@ def chamar_api_backend(
     return f"❌ Não foi possível conectar ao servidor backend da Vetra ({API_BASE_URL}).{sufixo}", None, False, None
 
 
-st.markdown("""
+st.markdown(
+    """
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
-:root { --bg-deep:#0A0F1C; --bg-panel:#0F1626; --bg-surface:#141D33; --border-subtle:#223050; --border-strong:#2E4270; --accent:#45C4B0; --accent-soft:rgba(69,196,176,.14); --text-primary:#E9EEF7; --text-muted:#8496B8; --text-faint:#5A6C8C; }
-html,body,[class*="css"]{font-family:'Inter',-apple-system,sans-serif}
-[data-testid="stAppViewContainer"]{background:radial-gradient(circle at 15% 0%,rgba(69,196,176,.06),transparent 40%),radial-gradient(circle at 85% 100%,rgba(232,169,69,.05),transparent 40%),var(--bg-deep)}
-[data-testid="stHeader"]{background:transparent} footer,#MainMenu{visibility:hidden}
-[data-testid="stSidebar"]{background:var(--bg-panel);border-right:1px solid var(--border-subtle)} [data-testid="stSidebar"] *{color:var(--text-primary)}
-div[data-baseweb="input"]>div,div[data-baseweb="select"]>div,input,textarea,[data-testid="stChatInput"] textarea{background-color:var(--bg-surface)!important;color:var(--text-primary)!important;border-color:var(--border-strong)!important}
-.vt-card{background:var(--bg-surface);border:1px solid var(--border-subtle);border-radius:10px;padding:14px 16px;margin-bottom:10px}.vt-card-title{font-size:.72rem;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--text-faint);margin-bottom:6px}.vt-tool-row{display:flex;gap:8px;padding:6px 0;border-bottom:1px solid var(--border-subtle);font-size:.82rem}.vt-tool-name{font-family:'JetBrains Mono',monospace;color:var(--accent);font-size:.76rem}.vt-tool-desc{color:var(--text-muted)}
-.vt-pill{display:inline-flex;align-items:center;gap:6px;background:var(--accent-soft);border:1px solid rgba(69,196,176,.35);color:var(--accent);font-size:.78rem;padding:4px 12px;border-radius:999px}.vt-dot{width:6px;height:6px;border-radius:50%;background:var(--accent)}.vt-hero{display:flex;align-items:center;gap:14px;padding:4px 0 2px}.vt-mark{width:42px;height:42px;border-radius:11px;background:linear-gradient(135deg,var(--accent),#2E8C7E);display:flex;align-items:center;justify-content:center;font-family:'Space Grotesk',sans-serif;font-weight:700;color:#06120F;font-size:1.15rem}[data-testid="stChatMessage"]{background:var(--bg-surface);border:1px solid var(--border-subtle);border-radius:12px}.vt-sep{border-top:1px solid var(--border-subtle);margin:14px 0}
+[data-testid="stAppViewContainer"] {
+    background:
+        radial-gradient(ellipse at 16% 0%, rgba(69, 196, 176, .08), transparent 34rem),
+        #090D18;
+}
+[data-testid="stMainBlockContainer"] {
+    max-width: 1160px;
+}
+[data-testid="stHeader"] {
+    background: transparent;
+}
+[data-testid="stSidebar"] {
+    border-right: 1px solid #202B3D;
+}
+[data-testid="stChatMessage"] {
+    border: 1px solid rgba(125, 150, 185, .13);
+    border-radius: 18px;
+    background: rgba(17, 24, 39, .68);
+}
+[data-testid="stChatInput"] {
+    border: 1px solid rgba(83, 214, 181, .3);
+    border-radius: 18px;
+    background: rgba(17, 24, 39, .92);
+    box-shadow: 0 12px 36px rgba(0, 0, 0, .2);
+}
+.vt-brand {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: .4rem 0 1.6rem;
+}
+.vt-mark {
+    display: grid;
+    width: 48px;
+    height: 48px;
+    place-items: center;
+    border: 1px solid rgba(83, 214, 181, .32);
+    border-radius: 15px;
+    background: linear-gradient(145deg, rgba(83, 214, 181, .2), rgba(83, 214, 181, .04));
+    color: #67E3C2;
+    font: 700 1.35rem 'Space Grotesk', sans-serif;
+}
+.vt-eyebrow {
+    color: #67E3C2;
+    font-size: .68rem;
+    font-weight: 600;
+    letter-spacing: .16em;
+}
+.vt-brand h1 {
+    margin: .12rem 0;
+    font: 600 1.55rem 'Space Grotesk', sans-serif;
+}
+.vt-brand p {
+    margin: 0;
+    color: #8998AE;
+    font-size: .88rem;
+}
+.vt-kicker {
+    color: #8C9AB0;
+    font-size: .8rem;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+}
+.vt-welcome {
+    max-width: 52rem;
+    padding: 1.2rem 0 1.6rem;
+}
+.vt-welcome h2 {
+    margin: .4rem 0;
+    font: 600 clamp(1.7rem, 3vw, 2.5rem) 'Space Grotesk', sans-serif;
+    letter-spacing: -.035em;
+}
+.vt-welcome p {
+    max-width: 42rem;
+    color: #97A5BA;
+    font-size: 1rem;
+    line-height: 1.7;
+}
+.vt-section-label {
+    margin: 1.5rem 0 .6rem;
+    color: #8C9AB0;
+    font-size: .74rem;
+    font-weight: 600;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+}
+.vt-tool-name {
+    color: #67E3C2;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: .76rem;
+}
 </style>
-""", unsafe_allow_html=True)
+""",
+    unsafe_allow_html=True,
+)
 
 
 with st.sidebar:
-    st.markdown('<div class="vt-hero"><div class="vt-mark">V</div><div><h1 style="font-size:1.15rem;">Vetra</h1><p style="font-size:0.78rem;">Agente Consultivo de Dados</p></div></div>', unsafe_allow_html=True)
-    st.markdown('<div class="vt-sep"></div>', unsafe_allow_html=True)
-    status_texto = "Chave detectada" if obter_chave_gemini_segura() else "API Backend configurada"
-    st.markdown(f'<span class="vt-pill"><span class="vt-dot"></span>{status_texto}</span>', unsafe_allow_html=True)
-    st.markdown('<div class="vt-sep"></div>', unsafe_allow_html=True)
-
-    st.markdown('<div class="vt-card-title">Feedback e dataset de fine-tuning</div>', unsafe_allow_html=True)
-    registros_feedback = st.session_state.feedback_fine_tuning
-    st.caption(
-        f"{len(registros_feedback)} exemplo(s) revisado(s). "
-        "Nenhum treinamento é iniciado automaticamente."
+    st.markdown(
+        '<div class="vt-brand"><div class="vt-mark">V</div><div>'
+        '<span class="vt-eyebrow">DATA INTELLIGENCE</span>'
+        '<h1>Vetra</h1><p>Seu espaço de análise</p></div></div>',
+        unsafe_allow_html=True,
     )
-    if registros_feedback:
-        st.warning(
-            "O JSONL contém prompts e respostas. Revise dados pessoais ou "
-            "confidenciais antes de compartilhar."
-        )
-        st.download_button(
-            "Baixar dataset JSONL",
-            data=exportar_jsonl(registros_feedback),
-            file_name=f"vetra_feedback_{datetime.now():%Y%m%d_%H%M%S}.jsonl",
-            mime="application/x-ndjson",
-            key="download_feedback_jsonl",
-        )
+    gemini_configurada = bool(obter_chave_gemini_segura())
+    st.badge(
+        "Credencial Gemini detectada" if gemini_configurada else "Modo backend",
+        icon=":material/circle:",
+        color="green" if gemini_configurada else "blue",
+    )
+
+    registros_feedback = st.session_state.feedback_fine_tuning
     if st.session_state.feedback_notice:
-        st.success(st.session_state.feedback_notice)
+        st.toast(st.session_state.feedback_notice, icon=":material/check_circle:")
         st.session_state.feedback_notice = None
 
-    with st.expander("⚡ Prompts Rápidos", expanded=False):
+    with st.expander("Ações rápidas", icon=":material/bolt:", expanded=False):
         for rotulo, texto in [
-            ("📊 Consultar OTIF Geral", "Calcular indicador OTIF acumulado da empresa"),
-            ("🗄️ Detalhar tb_producao", "Descrever estrutura da tabela tb_producao"),
-            ("💲 Cotação Moedas Hoje", "Consultar cotação do Dólar e Euro atual"),
+            ("Consultar OTIF", "Calcular indicador OTIF acumulado da empresa"),
+            ("Explorar tb_producao", "Descrever estrutura da tabela tb_producao"),
+            ("Ver cotação de moedas", "Consultar cotação do Dólar e Euro atual"),
         ]:
-            if st.button(rotulo, use_container_width=True):
+            if st.button(rotulo, width="stretch"):
                 st.session_state.pending_prompt = texto
                 st.rerun()
 
-    st.markdown('<div class="vt-sep"></div>', unsafe_allow_html=True)
-    st.markdown('<div class="vt-card-title">Ingestão RAG (Qdrant)</div>', unsafe_allow_html=True)
-    extensoes_rag = sorted(
-        extension.lstrip(".")
-        for extension in SUPPORTED_UPLOAD_EXTENSIONS
-        if extension not in CHAT_ONLY_EXTENSIONS
+    with st.expander("Adicionar conhecimento", icon=":material/database:", expanded=False):
+        extensoes_rag = sorted(
+            extension.lstrip(".")
+            for extension in SUPPORTED_UPLOAD_EXTENSIONS
+            if extension not in CHAT_ONLY_EXTENSIONS
+        )
+        arquivo_uploaded = st.file_uploader(
+            "Documento para indexar",
+            type=extensoes_rag,
+            key="uploader_rag",
+            help="Textos, PDF, Office, dados tabulares e imagens com texto.",
+        )
+        st.caption(
+            "O texto extraído será enviado ao Qdrant. Evite dados sem autorização."
+        )
+        cat_input = st.text_input("Categoria", value="Documentação técnica")
+        if st.button(
+            "Indexar documento",
+            icon=":material/upload:",
+            width="stretch",
+        ) and arquivo_uploaded:
+            try:
+                if arquivo_uploaded.size > MAX_UPLOAD_BYTES:
+                    raise ValueError(
+                        "O arquivo excede o limite de "
+                        f"{MAX_UPLOAD_BYTES // (1024 * 1024)} MB."
+                    )
+                conteudo_texto = extrair_texto_upload(arquivo_uploaded).strip()
+                if not conteudo_texto:
+                    st.warning("O arquivo não contém texto extraível.")
+                else:
+                    if len(conteudo_texto) > MAX_TEXTO_RAG:
+                        st.warning(
+                            "O conteúdo foi limitado aos primeiros "
+                            f"{MAX_TEXTO_RAG:,} caracteres."
+                        )
+                        conteudo_texto = conteudo_texto[:MAX_TEXTO_RAG]
+                    fonte_segura = os.path.basename(arquivo_uploaded.name).replace(
+                        "'", ""
+                    )
+                    categoria_segura = cat_input.strip().replace("'", "") or "Geral"
+                    st.session_state.pending_prompt = (
+                        "Por favor, use a ferramenta "
+                        "'indexar_documento_com_chunking' para salvar o seguinte "
+                        f"texto com a fonte '{fonte_segura}' e categoria "
+                        f"'{categoria_segura}':\n\n{conteudo_texto}"
+                    )
+                    st.rerun()
+            except Exception as erro:
+                st.error(f"Não foi possível ler o arquivo: {erro}")
+
+    with st.expander("Preferências", icon=":material/tune:", expanded=False):
+        dialetos = ["PostgreSQL", "Databricks SQL", "MySQL", "BigQuery", "Oracle"]
+        atual = st.session_state.preferencias_usuario.get(
+            "dialeto_sql", "PostgreSQL"
+        )
+        st.session_state.preferencias_usuario["dialeto_sql"] = st.selectbox(
+            "Dialeto SQL",
+            dialetos,
+            index=dialetos.index(atual) if atual in dialetos else 0,
+        )
+        st.session_state.preferencias_usuario["mascarar_pii"] = st.toggle(
+            "Mascarar dados pessoais",
+            value=bool(
+                st.session_state.preferencias_usuario.get("mascarar_pii", True)
+            ),
+            help="Mascara CPFs, e-mails, telefones e nomes na visualização.",
+        )
+        perfis = [
+            "Engenheiro de Dados (Preciso)",
+            "Analista de BI (Consultivo)",
+            "Auditor de Governança (Estrito)",
+        ]
+        perfil_atual = st.session_state.preferencias_usuario.get("perfil", perfis[0])
+        perfil = st.selectbox(
+            "Perfil de resposta",
+            perfis,
+            index=perfis.index(perfil_atual) if perfil_atual in perfis else 0,
+        )
+        st.session_state.preferencias_usuario["perfil"] = perfil
+        st.session_state.preferencias_usuario["temperatura"] = {
+            perfis[0]: 0.1,
+            perfis[1]: 0.3,
+            perfis[2]: 0.0,
+        }[perfil]
+
+    with st.expander("Ferramentas", icon=":material/build:", expanded=False):
+        st.caption("Ferramentas disponíveis para consultas e análises.")
+        for ferramenta in CATALOGO_FERRAMENTAS:
+            st.markdown(
+                f"**`{ferramenta['nome']}`**  \n{ferramenta['descricao']}"
+            )
+
+    painel_feedback = st.expander(
+        "Feedback curado",
+        icon=":material/rate_review:",
+        expanded=False,
+        on_change="rerun",
     )
-    arquivo_uploaded = st.file_uploader(
-        "Carregar documento ou imagem para indexação",
-        type=extensoes_rag,
-        key="uploader_rag",
-        help="PDF, Office, código, dados tabulares e imagens com texto (OCR disponível no servidor).",
-    )
+    if painel_feedback.open:
+        with painel_feedback:
+            st.caption(
+                f"{len(registros_feedback)} exemplo(s). "
+                "Nenhum treinamento é iniciado automaticamente."
+            )
+            if registros_feedback:
+                st.warning(
+                    "Revise dados pessoais ou confidenciais antes de compartilhar."
+                )
+                st.download_button(
+                    "Baixar dataset JSONL",
+                    data=exportar_jsonl(registros_feedback),
+                    file_name=f"vetra_feedback_{datetime.now():%Y%m%d_%H%M%S}.jsonl",
+                    mime="application/x-ndjson",
+                    key="download_feedback_jsonl",
+                    width="stretch",
+                )
+
+    quantidade_mensagens = len(st.session_state.messages)
     st.caption(
-        "A indexação envia o texto extraído ao Qdrant configurado. "
-        "Não inclua dados sem autorização."
+        f"{quantidade_mensagens} "
+        f"{'mensagem' if quantidade_mensagens == 1 else 'mensagens'} · "
+        f"{st.session_state.total_chamadas_mcp} chamadas de ferramenta · "
+        f"último modelo: {st.session_state.ultimo_modelo or '—'}"
     )
-    cat_input = st.text_input("Categoria/Tag", value="Documentação Técnica")
-    if st.button("Indexar Arquivo no RAG", use_container_width=True) and arquivo_uploaded:
-        try:
-            if arquivo_uploaded.size > MAX_UPLOAD_BYTES:
-                raise ValueError(f"O arquivo excede o limite de {MAX_UPLOAD_BYTES // (1024 * 1024)} MB.")
-            conteudo_texto = extrair_texto_upload(arquivo_uploaded).strip()
-            if not conteudo_texto:
-                st.warning("O arquivo não contém texto extraível.")
-            else:
-                if len(conteudo_texto) > MAX_TEXTO_RAG:
-                    st.warning(f"O conteúdo foi limitado aos primeiros {MAX_TEXTO_RAG:,} caracteres.")
-                    conteudo_texto = conteudo_texto[:MAX_TEXTO_RAG]
-                fonte_segura = os.path.basename(arquivo_uploaded.name).replace("'", "")
-                categoria_segura = cat_input.strip().replace("'", "") or "Geral"
-                st.session_state.pending_prompt = f"Por favor, use a ferramenta 'indexar_documento_com_chunking' para salvar o seguinte texto com a fonte '{fonte_segura}' e categoria '{categoria_segura}':\n\n{conteudo_texto}"
-                st.rerun()
-        except Exception as erro:
-            st.error(f"Não foi possível ler o arquivo: {erro}")
-
-    st.markdown('<div class="vt-sep"></div>', unsafe_allow_html=True)
-    st.markdown('<div class="vt-card-title">Preferências de Memória</div>', unsafe_allow_html=True)
-    dialetos = ["PostgreSQL", "Databricks SQL", "MySQL", "BigQuery", "Oracle"]
-    atual = st.session_state.preferencias_usuario.get("dialeto_sql", "PostgreSQL")
-    st.session_state.preferencias_usuario["dialeto_sql"] = st.selectbox("Dialeto SQL Alvo", dialetos, index=dialetos.index(atual) if atual in dialetos else 0)
-    st.session_state.preferencias_usuario["mascarar_pii"] = st.toggle("Mascaramento de PII", value=bool(st.session_state.preferencias_usuario.get("mascarar_pii", True)), help="Mascara automaticamente CPFs, E-mails e Nomes na exibição.")
-    perfis = ["Engenheiro de Dados (Preciso)", "Analista de BI (Consultivo)", "Auditor de Governança (Estrito)"]
-    perfil_atual = st.session_state.preferencias_usuario.get("perfil", perfis[0])
-    perfil = st.selectbox("Modo de Operação", perfis, index=perfis.index(perfil_atual) if perfil_atual in perfis else 0)
-    st.session_state.preferencias_usuario["perfil"] = perfil
-    st.session_state.preferencias_usuario["temperatura"] = {perfis[0]: 0.1, perfis[1]: 0.3, perfis[2]: 0.0}[perfil]
-
-    st.markdown('<div class="vt-sep"></div>', unsafe_allow_html=True)
-    st.markdown('<div class="vt-card-title">Ferramentas MCP</div>', unsafe_allow_html=True)
-    linhas = "".join(f'<div class="vt-tool-row"><span class="vt-tool-name">{f["nome"]}</span><span class="vt-tool-desc">— {f["descricao"]}</span></div>' for f in CATALOGO_FERRAMENTAS)
-    st.markdown(f'<div class="vt-card">{linhas}</div>', unsafe_allow_html=True)
-    st.markdown(f'<div class="vt-card"><div class="vt-tool-row">Mensagens trocadas</div><div>{len(st.session_state.messages)}</div><div class="vt-tool-row">Último modelo usado</div><div class="vt-tool-name">{st.session_state.ultimo_modelo or "—"}</div><div class="vt-tool-row">Chamadas MCP</div><div>{st.session_state.total_chamadas_mcp}</div></div>', unsafe_allow_html=True)
-    if st.button("🗑️ Limpar conversa", use_container_width=True):
+    if st.button(
+        "Limpar conversa",
+        icon=":material/delete_outline:",
+        type="tertiary",
+        width="stretch",
+    ):
         st.session_state.messages = [{"role": "model", "content": "Conversa reiniciada. Em que posso ajudar agora?"}]
         st.session_state.ultimo_modelo = None
         st.session_state.total_chamadas_mcp = 0
         st.session_state.pending_prompt = None
+        st.session_state.pop("vetra_suggestion", None)
         st.rerun()
-    st.caption("Vetra Client — Powered by FastAPI + MCP Backend.")
 
 
-st.markdown('<div class="vt-hero"><div class="vt-mark">V</div><div><h1>Vetra — Agente Consultivo de Dados e Engenharia</h1><p>Conectado à API FastAPI · Servidor MCP · Qdrant Vector Database</p></div></div>', unsafe_allow_html=True)
-st.markdown('<div class="vt-sep"></div>', unsafe_allow_html=True)
+st.markdown(
+    '<div class="vt-welcome"><div class="vt-kicker">'
+    '◆ &nbsp; CONSULTORIA DE DADOS COM IA</div>'
+    '<h2>Dados mais claros.<br>Decisões melhores.</h2>'
+    '<p>Explore esquemas, valide regras de negócio e transforme perguntas '
+    "em análises e SQL com apoio da Vetra.</p></div>",
+    unsafe_allow_html=True,
+)
 
+sugestao_selecionada = None
 if len(st.session_state.messages) == 1:
-    st.markdown('<div class="vt-card-title">Sugestões para começar</div>', unsafe_allow_html=True)
-    for coluna, sugestao in zip(st.columns(len(SUGESTOES_INICIAIS)), SUGESTOES_INICIAIS):
-        with coluna:
-            if st.button(sugestao, use_container_width=True, key=f"sug_{sugestao}"):
-                st.session_state.pending_prompt = sugestao
-                st.rerun()
+    st.markdown(
+        '<div class="vt-section-label">Comece por aqui</div>',
+        unsafe_allow_html=True,
+    )
+    sugestao_selecionada = st.pills(
+        "Sugestões de consulta",
+        SUGESTOES_INICIAIS,
+        selection_mode="single",
+        label_visibility="collapsed",
+        width="stretch",
+        key="vetra_suggestion",
+    )
+    if sugestao_selecionada:
+        prompt_sugerido = sugestao_selecionada
+    else:
+        prompt_sugerido = None
+else:
+    prompt_sugerido = None
 
-AVATAR_USUARIO, AVATAR_MODELO = "👤", "🤖"
+AVATAR_USUARIO, AVATAR_MODELO = ":material/person:", ":material/auto_awesome:"
+feedback_por_exchange = {
+    registro["exchange_id"]: registro
+    for registro in st.session_state.feedback_fine_tuning
+}
 for mensagem in st.session_state.messages:
     role = "assistant" if mensagem.get("role") == "model" else mensagem.get("role", "user")
     with st.chat_message(role, avatar=AVATAR_MODELO if role == "assistant" else AVATAR_USUARIO):
         st.markdown(str(mensagem.get("content", "")))
         exchange_id = mensagem.get("exchange_id") if role == "assistant" else None
         if exchange_id:
-            registro_existente = next(
-                (
-                    registro
-                    for registro in st.session_state.feedback_fine_tuning
-                    if registro["exchange_id"] == exchange_id
-                ),
-                None,
-            )
+            registro_existente = feedback_por_exchange.get(exchange_id)
             if registro_existente:
                 st.caption(
                     "Feedback salvo: "
@@ -535,25 +707,31 @@ for mensagem in st.session_state.messages:
                         f"Limite de {MAX_FEEDBACK_EXAMPLES} exemplos nesta sessão."
                     )
 
-arquivos_anexados = st.file_uploader(
-    "📎 Anexar documentos, imagens, código, áudio ou vídeo",
-    type=sorted(extension.lstrip(".") for extension in SUPPORTED_UPLOAD_EXTENSIONS),
-    accept_multiple_files=True,
-    key=f"uploader_{len(st.session_state.messages)}",
-    help=(
-        "PDF, Office, texto/código, CSV/TSV/Parquet, PNG/JPG/WEBP, "
-        "áudio e vídeo compatíveis. Limite por arquivo: "
-        f"{MAX_UPLOAD_BYTES // (1024 * 1024)} MB."
+envio_chat = st.chat_input(
+    "Pergunte sobre seus dados ou anexe arquivos…",
+    accept_file="multiple",
+    file_type=sorted(
+        extension.lstrip(".") for extension in SUPPORTED_UPLOAD_EXTENSIONS
     ),
+    max_upload_size=max(1, MAX_UPLOAD_BYTES // (1024 * 1024)),
+    submit_mode="disable",
+    key="vetra_chat_input",
 )
-st.caption(
-    "Anexos de conversa são enviados ao provedor Gemini configurado. "
-    "Evite segredos, credenciais e dados pessoais sem autorização."
-)
-prompt = st.chat_input("Digite sua pergunta sobre os dados, envie um print ou solicite um SQL...")
+if envio_chat is None:
+    prompt = None
+    arquivos_anexados = []
+elif isinstance(envio_chat, str):
+    prompt = envio_chat
+    arquivos_anexados = []
+else:
+    prompt = str(getattr(envio_chat, "text", "") or "")
+    arquivos_anexados = list(getattr(envio_chat, "files", []) or [])
+
 if st.session_state.pending_prompt and not prompt:
     prompt = st.session_state.pending_prompt
     st.session_state.pending_prompt = None
+elif not prompt and prompt_sugerido:
+    prompt = prompt_sugerido
 
 anexos_payload = []
 erros_anexos = []
@@ -592,30 +770,61 @@ if (prompt or arquivos_anexados) and not erros_anexos:
 
     with st.chat_message("assistant", avatar=AVATAR_MODELO):
         resposta_stream = st.empty()
-        estado_stream = {"texto": ""}
-        with st.status("🔍 *Processando consulta com inteligência de dados...*", expanded=True) as status_box:
-            status_box.write("1. Conectando ao backend FastAPI e orquestrador MCP...")
+        estado_stream = {
+            "texto": "",
+            "caracteres_pendentes": 0,
+            "ultima_atualizacao": time.monotonic(),
+            "houve_renderizacao": False,
+        }
+        with st.status(
+            ":material/auto_awesome: Consultando seus dados",
+            type="compact",
+            expanded=False,
+        ) as status_box:
+            status_box.write("Conectando às ferramentas e ao modelo…")
 
             def atualizar_progresso(evento: dict[str, Any]) -> None:
                 tipo_evento = evento.get("type")
                 if tipo_evento == "status":
                     status_box.write(str(evento.get("message", "Processando...")))
                 elif tipo_evento == "model":
-                    status_box.write(f"🤖 Consultando o modelo `{evento.get('name')}`...")
+                    status_box.write(
+                        f":material/psychology: Consultando `{evento.get('name')}`…"
+                    )
                 elif tipo_evento == "tool_start":
                     status_box.write(
-                        f"🛠️ Executando `{evento.get('name')}` "
-                        f"(etapa {evento.get('step')}/{evento.get('total_steps')})..."
+                        f":material/build: Executando `{evento.get('name')}` "
+                        f"(etapa {evento.get('step')}/{evento.get('total_steps')})…"
                     )
                 elif tipo_evento == "tool_done":
-                    prefixo = "⚠️" if evento.get("error") else "✅"
-                    status_box.write(f"{prefixo} Ferramenta `{evento.get('name')}` concluída.")
+                    icone = (
+                        ":material/warning:"
+                        if evento.get("error")
+                        else ":material/check_circle:"
+                    )
+                    status_box.write(
+                        f"{icone} Ferramenta `{evento.get('name')}` concluída."
+                    )
                 elif tipo_evento == "reset":
                     estado_stream["texto"] = ""
+                    estado_stream["caracteres_pendentes"] = 0
+                    estado_stream["ultima_atualizacao"] = time.monotonic()
+                    estado_stream["houve_renderizacao"] = False
                     resposta_stream.empty()
                 elif tipo_evento == "token":
-                    estado_stream["texto"] += str(evento.get("text", ""))
-                    resposta_stream.markdown(estado_stream["texto"])
+                    trecho = str(evento.get("text", ""))
+                    estado_stream["texto"] += trecho
+                    estado_stream["caracteres_pendentes"] += len(trecho)
+                    agora = time.monotonic()
+                    if (
+                        not estado_stream["houve_renderizacao"]
+                        or estado_stream["caracteres_pendentes"] >= 64
+                        or agora - estado_stream["ultima_atualizacao"] >= 0.15
+                    ):
+                        resposta_stream.markdown(estado_stream["texto"])
+                        estado_stream["caracteres_pendentes"] = 0
+                        estado_stream["ultima_atualizacao"] = agora
+                        estado_stream["houve_renderizacao"] = True
 
             resposta, modelo_usado, mcp_chamado, retorno_mcp = chamar_api_backend(
                 prompt_texto,
@@ -626,11 +835,27 @@ if (prompt or arquivos_anexados) and not erros_anexos:
                 on_event=atualizar_progresso,
             )
             resposta = str(resposta or "Sem resposta do backend.")
-            status_box.write("2. Sintetizando resposta final e validando regras...")
-            estado_erro = resposta.startswith("❌")
-            status_box.update(label="❌ Falha no processamento" if estado_erro else "✅ Processamento concluído com sucesso!", state="error" if estado_erro else "complete", expanded=estado_erro)
+            estado_erro = resposta.startswith(("❌", "⚠️ Erro:"))
+            status_box.update(
+                label=(
+                    "Falha ao processar a consulta"
+                    if estado_erro
+                    else "Resposta pronta"
+                ),
+                state="error" if estado_erro else "complete",
+                expanded=estado_erro,
+            )
 
-        resposta_stream.markdown(resposta)
+        if resposta.startswith("❌"):
+            resposta_stream.error(resposta, icon=":material/error:")
+        elif resposta.startswith("⚠️ Erro:"):
+            resposta_stream.warning(
+                resposta.removeprefix("⚠️ Erro:").strip(),
+                title="Configuração necessária",
+                icon=":material/warning:",
+            )
+        else:
+            resposta_stream.markdown(resposta)
         bloco_sql = re.search(r"```sql\s*(.*?)```", resposta, flags=re.IGNORECASE | re.DOTALL)
         if bloco_sql:
             sql_code = bloco_sql.group(1).strip()
@@ -665,14 +890,17 @@ if (prompt or arquivos_anexados) and not erros_anexos:
                             combinado = combinado.dropna(subset=["Valor"])
                             if not combinado.empty:
                                 figura = px.line(combinado, x="data", y="Valor", color="Tipo", markers=True, title="📈 Projeção Tendencial e Séries Temporais", color_discrete_map={"Histórico": "#45C4B0", "Projeção ML": "#E8A945"})
-                                st.plotly_chart(figura, use_container_width=True)
+                                st.plotly_chart(figura, width="stretch")
                     elif "total_anomalias_encontradas" in dados:
                         c1, c2, c3 = st.columns(3)
                         c1.metric("Linhas Analisadas", dados.get("total_linhas_analisadas", 0))
                         c2.metric("Anomalias Detectadas", dados.get("total_anomalias_encontradas", 0))
                         c3.metric("Taxa de Contaminação", f"{dados.get('percentual_anomalias', 0)}%")
                         if dados.get("amostra_anomalias_detectadas"):
-                            st.dataframe(pd.DataFrame(dados["amostra_anomalias_detectadas"]), use_container_width=True)
+                            st.dataframe(
+                                pd.DataFrame(dados["amostra_anomalias_detectadas"]),
+                                width="stretch",
+                            )
                 elif isinstance(dados, dict) and isinstance(dados.get("linhas"), list) and isinstance(dados.get("colunas"), list):
                     df_bruto = pd.DataFrame(dados["linhas"], columns=dados["colunas"])
                     alertas = executar_sanity_check_df(df_bruto)
@@ -686,14 +914,22 @@ if (prompt or arquivos_anexados) and not erros_anexos:
                     st.markdown("#### 📊 Painel de Análise e Visualização de Dados")
                     col_df, col_chart = st.columns([1, 1])
                     with col_df:
-                        st.dataframe(df_exibicao, use_container_width=True)
+                        st.dataframe(df_exibicao, width="stretch")
                         st.download_button("📥 Baixar Dados da Tabela (.csv)", df_exibicao.to_csv(index=False).encode("utf-8-sig"), file_name=f"dados_vetra_{datetime.now():%H%M%S}.csv", mime="text/csv", key=f"dl_csv_{len(st.session_state.messages)}")
                     with col_chart:
                         numericas = list(df_exibicao.select_dtypes(include="number").columns)
                         if not df_exibicao.empty and numericas:
                             eixo_x = st.selectbox("Eixo X", list(df_exibicao.columns), key=f"chart_x_{len(st.session_state.messages)}")
                             eixo_y = st.selectbox("Eixo Y", numericas, key=f"chart_y_{len(st.session_state.messages)}")
-                            st.plotly_chart(px.bar(df_exibicao, x=eixo_x, y=eixo_y, title=f"{eixo_y} por {eixo_x}"), use_container_width=True)
+                            st.plotly_chart(
+                                px.bar(
+                                    df_exibicao,
+                                    x=eixo_x,
+                                    y=eixo_y,
+                                    title=f"{eixo_y} por {eixo_x}",
+                                ),
+                                width="stretch",
+                            )
             except (json.JSONDecodeError, ValueError, TypeError) as erro:
                 st.warning(f"Não foi possível renderizar a visualização tabular/gráfica: {erro}")
 

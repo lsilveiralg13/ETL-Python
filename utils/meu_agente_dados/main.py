@@ -629,7 +629,6 @@ async def gerar_conteudo_streaming(
     partes_texto: list[str] = []
     chamadas_por_chave: dict[str, dict[str, Any]] = {}
     chamadas_por_ordem: list[str] = []
-    conteudo_modelo: Any = None
 
     stream = client.aio.models.generate_content_stream(
         model=modelo,
@@ -644,7 +643,6 @@ async def gerar_conteudo_streaming(
             conteudo = getattr(candidato, "content", None)
             if conteudo is None:
                 continue
-            conteudo_modelo = conteudo
             for indice, parte in enumerate(getattr(conteudo, "parts", None) or []):
                 texto = getattr(parte, "text", None)
                 if texto:
@@ -661,8 +659,12 @@ async def gerar_conteudo_streaming(
                         "name": nome,
                         "args": {},
                         "id": chamada_id,
+                        "thought_signature": None,
                     }
                     chamadas_por_ordem.append(chave)
+                assinatura = getattr(parte, "thought_signature", None)
+                if assinatura is not None:
+                    chamadas_por_chave[chave]["thought_signature"] = assinatura
                 argumentos = getattr(chamada, "args", None) or {}
                 _mesclar_argumentos(
                     chamadas_por_chave[chave]["args"],
@@ -682,16 +684,23 @@ async def gerar_conteudo_streaming(
     if texto_completo:
         partes_modelo.append(types.Part.from_text(text=texto_completo))
     partes_modelo.extend(
-        types.Part.from_function_call(
-            name=chamada.name,
-            args=chamada.args or {},
+        types.Part(
+            function_call=chamada,
+            thought_signature=(
+                base64.b64encode(
+                    chamadas_por_chave[chave]["thought_signature"]
+                ).decode("ascii")
+                if chamadas_por_chave[chave]["thought_signature"] is not None
+                else None
+            ),
         )
-        for chamada in chamadas
+        for chave, chamada in zip(chamadas_por_ordem, chamadas)
     )
-    if conteudo_modelo is None and partes_modelo:
-        conteudo_modelo = types.Content(role="model", parts=partes_modelo)
-    elif conteudo_modelo is not None:
-        conteudo_modelo = types.Content(role="model", parts=partes_modelo)
+    conteudo_modelo = (
+        types.Content(role="model", parts=partes_modelo)
+        if partes_modelo
+        else None
+    )
 
     candidato_modelo = (
         type("Candidate", (), {"content": conteudo_modelo})()
@@ -733,10 +742,23 @@ async def gerar_resposta_com_fallback(
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            erros.append(f"{modelo}: {mensagem_erro_segura(exc)}")
+            detalhe_erro = mensagem_erro_segura(exc)
+            erros.append(f"{modelo}: {detalhe_erro}")
+            if "thought_signature" in detalhe_erro.casefold():
+                raise RuntimeError(f"{modelo}: {detalhe_erro}") from exc
         await emitir_evento(callback, "reset")
 
     detalhe = "; ".join(erros[-3:])
+    if erros and all(
+        "RESOURCE_EXHAUSTED" in erro.upper() or "429" in erro
+        for erro in erros
+    ):
+        raise RuntimeError(
+            "A cota do Gemini está esgotada para todos os modelos configurados. "
+            "Aguarde a renovação da cota, habilite faturamento ou ajuste "
+            "GEMINI_MODELS para modelos disponíveis. "
+            f"Detalhes: {detalhe}"
+        )
     raise RuntimeError(f"Falha ao obter resposta dos modelos do Gemini. {detalhe}")
 
 

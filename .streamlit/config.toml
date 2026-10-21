@@ -1,0 +1,28 @@
+[theme]
+base = "dark"
+primaryColor = "#087F72"
+backgroundColor = "#090D18"
+secondaryBackgroundColor = "#111827"
+textColor = "#E8EEF7"
+font = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+headingFont = "'Space Grotesk':https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&display=swap"
+codeFont = "'JetBrains Mono':https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap"
+baseFontSize = 15
+baseRadius = "12px"
+buttonRadius = "10px"
+borderColor = "#202B3D"
+showWidgetBorder = false
+showSidebarBorder = true
+paddingTop = "1.5rem"
+paddingBottom = "1rem"
+chartCategoricalColors = ["#53D6B5", "#7AA2F7", "#F6BD60", "#C792EA", "#F28F8F", "#78DCE8"]
+
+[theme.sidebar]
+backgroundColor = "#0C1220"
+secondaryBackgroundColor = "#111827"
+textColor = "#DCE5F2"
+borderColor = "#202B3D"
+paddingTop = "1.25rem"
+
+[client]
+toolbarMode = "minimal"

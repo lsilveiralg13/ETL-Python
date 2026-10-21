@@ -28,6 +28,10 @@ graph TD
 
 [Próxima versão]
 
+* O ciclo Gemini preserva `thought_signature` nas chamadas de ferramenta; erros de assinatura inválida não disparam tentativas redundantes em outros modelos.
+* Anexos de conversa são selecionados e enviados junto com o prompt pelo campo de chat, sem iniciar consulta apenas por selecionar um arquivo. O preparo de documentos ocorre somente após o envio.
+* A interface usa tema escuro próprio, hierarquia visual mais leve, controles secundários recolhidos, ícones Material e atualizações de streaming agrupadas para reduzir renderizações.
+* `GEMINI_MODELS` permite configurar a ordem de modelos com cota disponível. Erros 429 de cota continuam visíveis com o detalhe retornado pelo provedor; ajuste faturamento/cotas no projeto Google quando todos os modelos configurados estiverem esgotados.
 * Backend mantém uma sessão MCP persistente por worker FastAPI; o processo e a conexão deixam de ser recriados a cada mensagem.
 * Respostas Gemini usam streaming assíncrono real. O SSE publica tokens, andamento, ferramentas em execução e conclusão; a UI atualiza a resposta progressivamente.
 * O ciclo agente limita concorrência, tempo total, etapas, tamanho de resultados e histórico; chamadas de ferramentas independentes podem rodar em paralelo.
@@ -40,6 +44,11 @@ graph TD
 * O seletor inclui Oracle SQL: a ferramenta usa o parser Oracle do SQLGlot, valida nomes de objetos sem diferenciar maiúsculas/minúsculas, aceita owner/schema e DUAL, reconhece pseudocolunas comuns e aplica limite de resultados. Não há conexão nem execução em Oracle.
 * Anexos aceitam imagens, PDF, Office, código/configuração, dados tabulares e formatos multimodais comuns de áudio/vídeo. Office, código e dados tabulares são extraídos para texto com limites; imagens/PDF digitalizados podem usar OCR se Tesseract estiver instalado. Arquivos desconhecidos, executáveis e compactados são rejeitados.
 * Feedback 👍/👎 com correção pode ser exportado como JSONL para curadoria. Os dados ficam apenas na sessão do Streamlit até serem baixados; não há treinamento automático. Revise conteúdo sensível antes de compartilhar.
+
+### Interface Streamlit
+
+* O tema da Vetra é definido em `.streamlit/config.toml` na raiz do repositório. Inicie o Streamlit com a raiz como diretório de trabalho para carregar a identidade visual.
+* O campo de chat aceita até `VETRA_MAX_ATTACHMENTS` arquivos por envio, limitado a `VETRA_MAX_UPLOAD_BYTES` por arquivo e `VETRA_MAX_TOTAL_ATTACHMENT_BYTES` no total.
 
 ### Docker e Fly.io
 

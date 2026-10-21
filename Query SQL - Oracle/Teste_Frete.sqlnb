@@ -1,0 +1,8 @@
+cells:
+  - kind: 2
+    value: "SELECT *\r
+
+      FROM FRIOPECASBI.SF_FRETE\r
+
+      WHERE ROWNUM <= 50"
+    languageId: oracle-sql

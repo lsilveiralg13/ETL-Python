@@ -237,9 +237,12 @@ class AgentRuntimeTests(unittest.TestCase):
                                 role="model",
                                 parts=[
                                     main.types.Part.from_text(text="dados."),
-                                    main.types.Part.from_function_call(
-                                        name="calcular_indicador_otif",
-                                        args={"unidade": "Contagem"},
+                                    main.types.Part(
+                                        function_call=main.types.FunctionCall(
+                                            name="calcular_indicador_otif",
+                                            args={"unidade": "Contagem"},
+                                        ),
+                                        thought_signature="c2ln",
                                     ),
                                 ],
                             )
@@ -270,6 +273,10 @@ class AgentRuntimeTests(unittest.TestCase):
         self.assertEqual(
             dict(resposta.function_calls[0].args),
             {"unidade": "Contagem"},
+        )
+        self.assertEqual(
+            resposta.candidates[0].content.parts[1].thought_signature,
+            b"sig",
         )
         self.assertEqual("".join(e["text"] for e in eventos), resposta.text)
 
@@ -343,6 +350,54 @@ class AgentRuntimeTests(unittest.TestCase):
             [evento["name"] for evento in eventos if evento["type"] == "model"],
             ["indisponivel", "alternativo"],
         )
+
+    def test_fallback_nao_repete_erro_deterministico_de_thought_signature(self):
+        modelos_consultados = []
+
+        class FakeModels:
+            async def generate_content_stream(self, *, model, **_kwargs):
+                modelos_consultados.append(model)
+                raise RuntimeError(
+                    "400 INVALID_ARGUMENT: thought_signature ausente"
+                )
+
+        client = SimpleNamespace(aio=SimpleNamespace(models=FakeModels()))
+
+        with self.assertRaisesRegex(RuntimeError, "thought_signature"):
+            asyncio.run(
+                main.gerar_resposta_com_fallback(
+                    client,
+                    ["modelo-inicial", "modelo-alternativo"],
+                    [],
+                    None,
+                )
+            )
+
+        self.assertEqual(modelos_consultados, ["modelo-inicial"])
+
+    def test_fallback_explica_cota_esgotada_em_todos_os_modelos(self):
+        modelos_consultados = []
+
+        class FakeModels:
+            async def generate_content_stream(self, *, model, **_kwargs):
+                modelos_consultados.append(model)
+                raise RuntimeError(
+                    "429 RESOURCE_EXHAUSTED: quota exceeded"
+                )
+
+        client = SimpleNamespace(aio=SimpleNamespace(models=FakeModels()))
+
+        with self.assertRaisesRegex(RuntimeError, "cota do Gemini está esgotada"):
+            asyncio.run(
+                main.gerar_resposta_com_fallback(
+                    client,
+                    ["modelo-a", "modelo-b"],
+                    [],
+                    None,
+                )
+            )
+
+        self.assertEqual(modelos_consultados, ["modelo-a", "modelo-b"])
 
     def test_runtime_mantem_uma_sessao_mcp_ate_o_encerramento(self):
         inicializacoes = []

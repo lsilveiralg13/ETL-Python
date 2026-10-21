@@ -1,0 +1,94 @@
+cells:
+  - kind: 2
+    value: "SELECT\r
+
+      \    COLUMN_NAME,\r
+
+      \    DATA_TYPE,\r
+
+      \    DATA_LENGTH,\r
+
+      \    DATA_PRECISION,\r
+
+      \    DATA_SCALE,\r
+
+      \    NULLABLE,\r
+
+      \    COLUMN_ID,\r
+
+      \    TABLE_NAME,\r
+
+      \    OWNER\r
+
+      FROM ALL_TAB_COLUMNS\r
+
+      WHERE OWNER = 'FRIOPECASBI'\r
+
+      \    AND TABLE_NAME = 'BASE_DEVOLUCAO'\r
+
+      \    --AND COLUMN_NAME LIKE '%VENDA%'\r
+
+      ORDER BY COLUMN_ID;"
+    languageId: oracle-sql
+  - kind: 2
+    value: "SELECT\r
+
+      \    COLUMN_NAME,\r
+
+      \    DATA_TYPE,\r
+
+      \    DATA_LENGTH,\r
+
+      \    DATA_PRECISION,\r
+
+      \    DATA_SCALE,\r
+
+      \    NULLABLE,\r
+
+      \    COLUMN_ID,\r
+
+      \    TABLE_NAME,\r
+
+      \    OWNER\r
+
+      FROM ALL_TAB_COLUMNS\r
+
+      WHERE OWNER = 'FRIOPECASBI'\r
+
+      \    AND TABLE_NAME = 'BASE_VENDAS'\r
+
+      \    --AND COLUMN_NAME LIKE '%NOTA%'\r
+
+      ORDER BY COLUMN_ID;"
+    languageId: oracle-sql
+  - kind: 2
+    value: "SELECT\r
+
+      \    COLUMN_NAME,\r
+
+      \    DATA_TYPE,\r
+
+      \    DATA_LENGTH,\r
+
+      \    DATA_PRECISION,\r
+
+      \    DATA_SCALE,\r
+
+      \    NULLABLE,\r
+
+      \    COLUMN_ID,\r
+
+      \    TABLE_NAME,\r
+
+      \    OWNER\r
+
+      FROM ALL_TAB_COLUMNS\r
+
+      WHERE OWNER = 'FRIOPECASBI'\r
+
+      \    AND TABLE_NAME = 'HIST_VENDAS'\r
+
+      \    --AND COLUMN_NAME LIKE '%VENDA%'\r
+
+      ORDER BY COLUMN_ID;"
+    languageId: oracle-sql
