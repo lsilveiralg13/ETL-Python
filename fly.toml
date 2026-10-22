@@ -24,7 +24,7 @@ primary_region = "gru"
 
 # Declaração dos dois processos isolados em VMs separadas no Fly.io
 [processes]
-  backend = "python -m uvicorn utils.meu_agente_dados.main:app --host fly-local-6pn --port 8000"
+  backend = "python -m uvicorn utils.meu_agente_dados.main:app --host :: --port 8000"
   frontend = "python -m streamlit run utils/meu_agente_dados/app.py --server.port 8501 --server.address 0.0.0.0"
 
 # O Streamlit guarda a sessão em memória e o Fly não tem afinidade de sessão:
