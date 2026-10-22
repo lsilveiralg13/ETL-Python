@@ -1432,10 +1432,18 @@ def github_auth_callback(payload: GitHubOAuthCallback):
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except requests.RequestException as exc:
-        logger.warning("Falha de comunicação com o GitHub durante o login.")
+        status = getattr(getattr(exc, "response", None), "status_code", None)
+        logger.warning(
+            "Falha de comunicação com o GitHub durante o login: %s (HTTP %s)",
+            type(exc).__name__,
+            status,
+        )
         raise HTTPException(
             status_code=502,
-            detail="Não foi possível concluir o login pelo GitHub.",
+            detail=(
+                "Não foi possível concluir o login pelo GitHub "
+                f"({type(exc).__name__}, HTTP {status or 'sem resposta'})."
+            ),
         ) from exc
     return {"session_token": session_id, "login": login}
 

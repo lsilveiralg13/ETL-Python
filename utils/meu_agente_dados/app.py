@@ -419,8 +419,16 @@ if "code" in st.query_params or "error" in st.query_params:
             st.session_state.pop("github_auth_error", None)
         except (requests.RequestException, ValueError, KeyError) as erro:
             logger.warning("Falha ao finalizar o login GitHub: %s", erro)
+            detalhe = ""
+            resposta_erro = getattr(erro, "response", None)
+            if resposta_erro is not None:
+                try:
+                    detalhe = str(resposta_erro.json().get("detail") or "")
+                except ValueError:
+                    detalhe = ""
             st.session_state.github_auth_error = (
                 "Não foi possível concluir o login do GitHub. Tente entrar novamente."
+                + (f" Motivo: {detalhe}" if detalhe else f" Detalhe técnico: {type(erro).__name__}: {erro}")
             )
 
 auth_status = st.session_state.get("github_auth_status")

@@ -100,7 +100,12 @@ class GitHubCopilotAuth:
         token_data = token_response.json()
         access_token = str(token_data.get("access_token") or "")
         if not access_token or token_data.get("error"):
-            raise ValueError("O GitHub não autorizou o acesso do Copilot.")
+            motivo = str(
+                token_data.get("error_description")
+                or token_data.get("error")
+                or "resposta sem access_token"
+            )
+            raise ValueError(f"O GitHub recusou o login: {motivo}")
 
         user_response = requests.get(
             GITHUB_USER_URL,
@@ -115,7 +120,10 @@ class GitHubCopilotAuth:
         login = str(user_response.json().get("login") or "")
         allowed_user = os.environ["VETRA_GITHUB_ALLOWED_USER"].strip()
         if not login or login.casefold() != allowed_user.casefold():
-            raise PermissionError("Esta conta GitHub não tem acesso à Vetra.")
+            raise PermissionError(
+                f"A conta GitHub '{login}' não tem acesso à Vetra "
+                "(confira VETRA_GITHUB_ALLOWED_USER)."
+            )
 
         expires_in = token_data.get("expires_in")
         access_expires_at = (
