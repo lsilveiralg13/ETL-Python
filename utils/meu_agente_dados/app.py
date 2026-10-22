@@ -434,7 +434,10 @@ if auth_status is None:
         auth_status = resposta_status.json()
         st.session_state.github_auth_status = auth_status
     except (requests.RequestException, ValueError) as erro:
-        logger.warning("Não foi possível consultar a configuração de autenticação.")
+        logger.warning(
+            "Não foi possível consultar a configuração de autenticação: %s",
+            erro,
+        )
         st.error(
             "Não foi possível conectar ao backend da Vetra para verificar o login. "
             "Recarregue a página ou tente novamente mais tarde."
