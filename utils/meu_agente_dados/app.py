@@ -440,7 +440,8 @@ if auth_status is None:
         )
         st.error(
             "Não foi possível conectar ao backend da Vetra para verificar o login. "
-            "Recarregue a página ou tente novamente mais tarde."
+            "Recarregue a página ou tente novamente mais tarde.\n\n"
+            f"Detalhe técnico: `{type(erro).__name__}: {erro}`"
         )
         st.stop()
 
