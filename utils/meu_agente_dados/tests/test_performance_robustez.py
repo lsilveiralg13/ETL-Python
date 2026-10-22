@@ -413,6 +413,29 @@ class AttachmentTests(unittest.TestCase):
 
 
 class AgentRuntimeTests(unittest.TestCase):
+    def test_lifespan_nao_bloqueia_inicio_da_api_ao_iniciar_mcp(self):
+        class FakeRuntime:
+            def __init__(self):
+                self.inicializado = False
+                self.encerrado = False
+
+            async def start(self):
+                self.inicializado = True
+
+            async def close(self):
+                self.encerrado = True
+
+        async def executar():
+            runtime = FakeRuntime()
+            fastapi_app = SimpleNamespace(state=SimpleNamespace())
+            with patch.object(main, "MCPRuntime", return_value=runtime):
+                async with main.lifespan(fastapi_app):
+                    self.assertIs(fastapi_app.state.mcp_runtime, runtime)
+                    self.assertFalse(runtime.inicializado)
+                    self.assertFalse(runtime.encerrado)
+                self.assertTrue(runtime.encerrado)
+
+        asyncio.run(executar())
     def test_oracle_dialeto_e_forcado_na_chamada_de_validacao_sql(self):
         request = main.ChatRequest(prompt="Use Oracle", dialeto_sql="oracle")
         self.assertEqual(request.dialeto_sql, "Oracle")

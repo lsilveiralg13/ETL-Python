@@ -309,10 +309,6 @@ async def lifespan(fastapi_app: FastAPI):
     runtime = MCPRuntime()
     fastapi_app.state.mcp_runtime = runtime
     try:
-        await runtime.start()
-    except Exception:
-        logger.exception("Inicialização do servidor MCP falhou; API seguirá degradada.")
-    try:
         yield
     finally:
         await runtime.close()
