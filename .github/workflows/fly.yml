@@ -16,12 +16,19 @@ jobs:
       - name: Setup Flyctl
         uses: superfly/flyctl-actions/setup-flyctl@master
 
+      - name: Reduzir para uma máquina por processo antes do deploy
+        run: |
+          flyctl scale count 1 --process-group backend --yes
+          flyctl scale count 1 --process-group frontend --yes
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+
       - name: Executar Deploy
         run: flyctl deploy --remote-only
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
 
-      - name: Manter uma máquina por processo
+      - name: Confirmar uma máquina por processo
         run: |
           flyctl scale count 1 --process-group backend --yes
           flyctl scale count 1 --process-group frontend --yes
