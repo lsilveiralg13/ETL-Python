@@ -362,6 +362,7 @@ class ChatRequest(BaseModel):
     )
     anexos: List[Anexo] = Field(default_factory=list, max_length=MAX_ANEXOS)
     provider: Literal["copilot", "gemini"] = "copilot"
+    modo: Literal["agent", "developer", "chat"] = "agent"
     dialeto_sql: str = Field(default="PostgreSQL", min_length=1, max_length=64)
     temperatura: float = Field(default=0.2, ge=0.0, le=2.0)
 
@@ -849,7 +850,23 @@ async def responder_diretamente_gemini(
         return f"❌ {mensagem_erro_segura(exc)}", None
 
 
-def criar_system_instruction(dialeto_sql: str) -> str:
+def criar_system_instruction(dialeto_sql: str, modo: str = "agent") -> str:
+    if modo == "chat":
+        return (
+            "Você é o Vetra em Modo Chat: um assistente inteligente e consultivo "
+            "para conversas sobre dados, negócios, conceitos e arquitetura. "
+            "Responda de forma direta, clara e prestativa. Não tente invocar "
+            "ferramentas externas neste modo."
+        )
+    if modo == "developer":
+        return (
+            "Você é o Vetra em Modo Developer: especialista técnico em engenharia "
+            "de dados, Python, scripts ETL, modelagem e otimização de queries SQL. "
+            f"O dialeto SQL preferido é: {dialeto_sql}. "
+            "Gere código limpo, documentado e boas práticas. Neste modo, não execute "
+            "ferramentas de banco diretamente; concentre-se na criação, revisão e "
+            "refatoração de código e queries."
+        )
     return (
         "Você é o Vetra, um especialista consultivo avançado em engenharia "
         "de dados, BI, RAG e SQL. Ajude o usuário a entender esquemas, criar "
@@ -988,6 +1005,7 @@ async def processar_com_copilot(
     access_token: str,
     runtime: MCPRuntime,
     callback: Optional[Callable[[dict[str, Any]], Awaitable[None]]],
+    modo: str = "agent",
 ) -> tuple[str, Optional[str], bool, Optional[str]]:
     try:
         from copilot import CopilotClient, PermissionHandler, ToolSet
@@ -1017,23 +1035,10 @@ async def processar_com_copilot(
             await client.start()
             cliente_iniciado = True
             await emitir_evento(callback, "model", name=modelo)
-            session = await client.create_session(
-                session_id=f"vetra-{uuid.uuid4()}",
-                model=modelo,
-                system_message={
-                    "mode": "append",
-                    "content": criar_system_instruction(dialeto_sql),
-                },
-                on_permission_request=PermissionHandler.approve_all,
-                available_tools=ToolSet().add_mcp("*").to_list(),
-                enable_config_discovery=False,
-                skip_custom_instructions=True,
-                enable_skills=False,
-                enable_file_hooks=False,
-                enable_host_git_operations=False,
-                enable_session_store=False,
-                session_limits={"max_ai_credits": COPILOT_MAX_AI_CREDITS},
-                mcp_servers={
+            usar_mcp = modo == "agent"
+            available_tools = ToolSet().add_mcp("*").to_list() if usar_mcp else []
+            mcp_servers_config = (
+                {
                     "vetra": {
                         "type": "local",
                         "command": sys.executable,
@@ -1042,7 +1047,28 @@ async def processar_com_copilot(
                         "tools": ["*"],
                         "timeout": int(TIMEOUT_TOOL_SEGUNDOS * 1000),
                     }
+                }
+                if usar_mcp
+                else None
+            )
+
+            session = await client.create_session(
+                session_id=f"vetra-{uuid.uuid4()}",
+                model=modelo,
+                system_message={
+                    "mode": "append",
+                    "content": criar_system_instruction(dialeto_sql, modo=modo),
                 },
+                on_permission_request=PermissionHandler.approve_all,
+                available_tools=available_tools,
+                enable_config_discovery=False,
+                skip_custom_instructions=True,
+                enable_skills=False,
+                enable_file_hooks=False,
+                enable_host_git_operations=False,
+                enable_session_store=False,
+                session_limits={"max_ai_credits": COPILOT_MAX_AI_CREDITS},
+                mcp_servers=mcp_servers_config,
             )
 
             def tratar_evento(evento: Any) -> None:
@@ -1139,6 +1165,7 @@ async def processar_mcp_e_llm(
     on_event: Optional[Callable[[dict[str, Any]], Awaitable[None]]] = None,
     provider: Literal["copilot", "gemini"] = "gemini",
     copilot_access_token: Optional[str] = None,
+    modo: str = "agent",
 ):
     if provider == "copilot":
         if not copilot_access_token:
@@ -1153,6 +1180,7 @@ async def processar_mcp_e_llm(
                 copilot_access_token,
                 runtime,
                 on_event,
+                modo=modo,
             )
         except asyncio.CancelledError:
             raise
@@ -1177,7 +1205,7 @@ async def processar_mcp_e_llm(
         return "⚠️ Erro: o prompt não pode ser vazio.", None, False, None
 
     client = genai.Client(api_key=api_key)
-    system_instruction = criar_system_instruction(dialeto_sql)
+    system_instruction = criar_system_instruction(dialeto_sql, modo=modo)
 
     historico_recente = list(historico_mensagens or [])[-MAX_HISTORICO_MENSAGENS:]
     historico_convertido: list[Any] = []
@@ -1248,6 +1276,17 @@ async def processar_mcp_e_llm(
         )
     partes_mensagem_atual.append(types.Part.from_text(text=prompt_usuario))
     contents.append(types.Content(role="user", parts=partes_mensagem_atual))
+
+    if modo != "agent":
+        # Modos Developer e Chat no Gemini não acoplam ferramentas MCP (economiza chamadas e latência)
+        try:
+            texto, modelo = await responder_diretamente_gemini(
+                client, contents, system_instruction, temperatura, on_event
+            )
+            return texto, modelo, False, None
+        finally:
+            await client.aio.aclose()
+            client.close()
 
     runtime = mcp_runtime or MCPRuntime()
     runtime_proprio = mcp_runtime is None
@@ -1585,6 +1624,7 @@ async def chat_endpoint(
                 app.state.mcp_runtime,
                 provider=payload.provider,
                 copilot_access_token=session[1],
+                modo=payload.modo,
             ),
             timeout=TIMEOUT_AGENT_SEGUNDOS,
         )
@@ -1637,6 +1677,7 @@ async def chat_stream_endpoint(
                         publicar_evento,
                         provider=payload.provider,
                         copilot_access_token=session[1],
+                        modo=payload.modo,
                     ),
                     timeout=TIMEOUT_AGENT_SEGUNDOS,
                 )

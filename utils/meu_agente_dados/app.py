@@ -158,6 +158,7 @@ def chamar_api_backend(
     access_token: str,
     anexos: Optional[list] = None,
     on_event: Optional[Callable[[dict[str, Any]], None]] = None,
+    modo: str = "agent",
 ):
     historico_recente = historico[-10:]
     historico_formatado = []
@@ -177,6 +178,7 @@ def chamar_api_backend(
         "historico": historico_formatado,
         "anexos": anexos or [],
         "provider": provider,
+        "modo": modo,
         "dialeto_sql": dialeto_sql,
         "temperatura": max(0.0, min(2.0, float(temperatura))),
     }
@@ -643,6 +645,21 @@ with st.sidebar:
                 atualizar_quota_copilot(copilot_session_token)
                 st.rerun()
 
+    modos_disponiveis = {
+        "🤖 Agent (MCP + Análise)": "agent",
+        "💻 Developer (Código/SQL)": "developer",
+        "💬 Chat (Conversa leve)": "chat",
+    }
+    modo_selecionado = st.radio(
+        "Modo de Operação",
+        list(modos_disponiveis.keys()),
+        index=list(modos_disponiveis.values()).index(
+            st.session_state.preferencias_usuario.get("modo", "agent")
+        ),
+        help="Agent: acopla ferramentas e queries (consome créditos). Developer e Chat: texto e código puros sem ferramentas externas.",
+    )
+    st.session_state.preferencias_usuario["modo"] = modos_disponiveis[modo_selecionado]
+
     registros_feedback = st.session_state.feedback_fine_tuning
     if st.session_state.feedback_notice:
         st.toast(st.session_state.feedback_notice, icon=":material/check_circle:")
@@ -1068,6 +1085,7 @@ if (prompt or arquivos_anexados) and not erros_anexos:
                 copilot_session_token,
                 anexos_payload,
                 on_event=atualizar_progresso,
+                modo=st.session_state.preferencias_usuario.get("modo", "agent"),
             )
             resposta = str(resposta or "Sem resposta do backend.")
             estado_erro = resposta.startswith(("❌", "⚠️ Erro:"))
