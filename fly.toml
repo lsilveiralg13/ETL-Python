@@ -24,12 +24,11 @@ primary_region = "gru"
 
 # Declaração dos dois processos isolados em VMs separadas no Fly.io
 [processes]
-  backend = "python -m uvicorn utils.meu_agente_dados.main:app --host 0.0.0.0 --port 8000"
+  backend = "python -m uvicorn utils.meu_agente_dados.main:app --host fly-local-6pn --port 8000"
   frontend = "python -m streamlit run utils/meu_agente_dados/app.py --server.port 8501 --server.address 0.0.0.0"
 
 # O Streamlit guarda a sessão em memória e o Fly não tem afinidade de sessão:
-# mantenha 1 máquina de frontend (fly deploy --ha=false; fly scale count frontend=1),
-# senão o upload de anexos falha com HTTP 400 ("Invalid session_id").
+# mantenha 1 máquina por processo; OAuth e sessões do Streamlit ficam em memória.
 # Rota pública exposta na internet (aponta exclusivamente para o Streamlit na porta 8501)
 [http_service]
   processes = ["frontend"]
