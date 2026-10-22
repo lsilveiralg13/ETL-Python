@@ -4,7 +4,7 @@ import os
 import re
 import time
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Optional
 
 import pandas as pd
@@ -340,6 +340,13 @@ st.markdown(
     color: #67E3C2;
     font: 700 1.35rem 'Space Grotesk', sans-serif;
 }
+.vt-quota span {
+    font: 600 1.6rem 'Space Grotesk', sans-serif;
+}
+.vt-quota small {
+    color: #8B97A8;
+    font: 400 .78rem 'Inter', sans-serif;
+}
 .vt-eyebrow {
     color: #67E3C2;
     font-size: .68rem;
@@ -430,6 +437,74 @@ if "code" in st.query_params or "error" in st.query_params:
                 "Não foi possível concluir o login do GitHub. Tente entrar novamente."
                 + (f" Motivo: {detalhe}" if detalhe else f" Detalhe técnico: {type(erro).__name__}: {erro}")
             )
+
+MESES_ABREV = [
+    "jan.", "fev.", "mar.", "abr.", "mai.", "jun.",
+    "jul.", "ago.", "set.", "out.", "nov.", "dez.",
+]
+
+
+def formatar_redefinicao(valor: Optional[str]) -> str:
+    if not valor:
+        return ""
+    try:
+        data = datetime.fromisoformat(str(valor).replace("Z", "+00:00"))
+    except ValueError:
+        return ""
+    if data.tzinfo is not None:
+        data = data.astimezone(timezone(timedelta(hours=-3)))
+    return (
+        f"Redefine {data.day} de {MESES_ABREV[data.month - 1]} "
+        f"às {data:%H:%M}"
+    )
+
+
+def atualizar_quota_copilot(token_sessao: str) -> None:
+    try:
+        resposta_quota = requests.get(
+            f"{API_BASE_URL}/copilot/quota",
+            headers={"Authorization": f"Bearer {token_sessao}"},
+            timeout=(5, 25),
+        )
+        resposta_quota.raise_for_status()
+        st.session_state.copilot_quota = resposta_quota.json().get("itens", [])
+        st.session_state.copilot_quota_erro = False
+    except (requests.RequestException, ValueError) as erro:
+        logger.warning("Falha ao consultar créditos do Copilot: %s", erro)
+        st.session_state.copilot_quota_erro = True
+    st.session_state.copilot_quota_ts = time.monotonic()
+
+
+def renderizar_quota_copilot() -> None:
+    itens = st.session_state.get("copilot_quota")
+    st.markdown("**Créditos Copilot**")
+    if itens is None:
+        st.caption(
+            "Indisponível no momento."
+            if st.session_state.get("copilot_quota_erro")
+            else "Carregando…"
+        )
+        return
+    if not itens:
+        st.caption("Plano sem limite de créditos informado.")
+    for item in itens:
+        rotulo = str(item["tipo"]).replace("_", " ").capitalize()
+        if item.get("ilimitado"):
+            st.caption(f"{rotulo}: ilimitado")
+            continue
+        usado, total = int(item["usado"]), int(item["total"])
+        st.markdown(
+            f"<div class='vt-quota'><span>{usado:,}/{total:,}".replace(",", ".")
+            + f" <small>usado · {rotulo}</small></span></div>",
+            unsafe_allow_html=True,
+        )
+        st.progress(min(1.0, usado / total) if total else 0.0)
+        detalhes = formatar_redefinicao(item.get("redefine_em"))
+        if item.get("excedente"):
+            detalhes += f" · excedente: {item['excedente']:g}"
+        if detalhes:
+            st.caption(detalhes)
+
 
 auth_status = st.session_state.get("github_auth_status")
 if auth_status is None:
@@ -548,7 +623,25 @@ with st.sidebar:
             logger.warning("Não foi possível encerrar a sessão no backend.")
         st.session_state.pop("copilot_session_token", None)
         st.session_state.pop("github_login", None)
+        for chave_quota in ("copilot_quota", "copilot_quota_ts", "copilot_quota_erro"):
+            st.session_state.pop(chave_quota, None)
         st.rerun()
+
+    if copilot_session_token:
+        quota_ts = st.session_state.get("copilot_quota_ts")
+        if quota_ts is None or time.monotonic() - quota_ts > 300:
+            atualizar_quota_copilot(copilot_session_token)
+        with st.container(border=True):
+            renderizar_quota_copilot()
+            if st.button(
+                "Atualizar créditos",
+                icon=":material/refresh:",
+                type="tertiary",
+                width="stretch",
+                key="atualizar_quota_copilot",
+            ):
+                atualizar_quota_copilot(copilot_session_token)
+                st.rerun()
 
     registros_feedback = st.session_state.feedback_fine_tuning
     if st.session_state.feedback_notice:
@@ -961,6 +1054,10 @@ if (prompt or arquivos_anexados) and not erros_anexos:
                     }
                     st.session_state.copilot_last_ai_credits = creditos
                     st.session_state.total_copilot_ai_credits += creditos
+                elif tipo_evento == "quota":
+                    st.session_state.copilot_quota = evento.get("itens", [])
+                    st.session_state.copilot_quota_erro = False
+                    st.session_state.copilot_quota_ts = time.monotonic()
 
             resposta, modelo_usado, mcp_chamado, retorno_mcp = chamar_api_backend(
                 prompt_texto,

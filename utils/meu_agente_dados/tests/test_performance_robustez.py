@@ -98,6 +98,46 @@ class CopilotAuthTests(unittest.TestCase):
                 auth.complete_login("oauth-code", state)
 
 
+class CopilotQuotaTests(unittest.TestCase):
+    def test_serializa_quota_ignorando_planos_sem_limite_definido(self):
+        limitado = SimpleNamespace(
+            is_unlimited_entitlement=False,
+            entitlement_requests=1500,
+            used_requests=855,
+            overage=0,
+            remaining_percentage=43.0,
+            reset_date="2026-10-31T21:00:00Z",
+        )
+        ilimitado = SimpleNamespace(
+            is_unlimited_entitlement=True,
+            entitlement_requests=-1,
+            used_requests=3,
+            overage=0,
+            remaining_percentage=100.0,
+            reset_date=None,
+        )
+        vazio = SimpleNamespace(
+            is_unlimited_entitlement=False,
+            entitlement_requests=0,
+            used_requests=0,
+            overage=0,
+            remaining_percentage=0,
+            reset_date=None,
+        )
+        itens = main.serializar_quota_copilot(
+            SimpleNamespace(
+                quota_snapshots={
+                    "premium_interactions": limitado,
+                    "chat": ilimitado,
+                    "extra": vazio,
+                }
+            )
+        )
+        self.assertEqual([item["tipo"] for item in itens], ["premium_interactions", "chat"])
+        self.assertEqual((itens[0]["usado"], itens[0]["total"]), (855, 1500))
+        self.assertTrue(itens[1]["ilimitado"])
+
+
 class CopilotPromptTests(unittest.TestCase):
     def test_prompt_preserva_historico_em_ordem_e_pula_roles_invalidos(self):
         prompt = main.preparar_prompt_copilot(

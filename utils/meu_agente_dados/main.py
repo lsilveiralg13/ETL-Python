@@ -941,6 +941,40 @@ def preparar_anexos_copilot(
     return "\n\n".join(trechos_texto), anexos_imagem
 
 
+def serializar_quota_copilot(resultado: Any) -> list[dict[str, Any]]:
+    itens: list[dict[str, Any]] = []
+    for chave, snap in (getattr(resultado, "quota_snapshots", None) or {}).items():
+        ilimitado = bool(getattr(snap, "is_unlimited_entitlement", False))
+        total = int(getattr(snap, "entitlement_requests", 0) or 0)
+        if not ilimitado and total <= 0:
+            continue
+        usado = int(getattr(snap, "used_requests", 0) or 0)
+        itens.append(
+            {
+                "tipo": str(chave),
+                "ilimitado": ilimitado,
+                "usado": usado,
+                "total": total,
+                "excedente": float(getattr(snap, "overage", 0) or 0),
+                "restante_pct": float(getattr(snap, "remaining_percentage", 0) or 0),
+                "redefine_em": getattr(snap, "reset_date", None),
+            }
+        )
+    return itens
+
+
+async def consultar_quota_copilot(client: Any, access_token: str) -> list[dict[str, Any]]:
+    from copilot.generated.rpc import AccountGetQuotaRequest
+
+    resultado = await asyncio.wait_for(
+        client.rpc.account.get_quota(
+            AccountGetQuotaRequest(git_hub_token=access_token)
+        ),
+        timeout=15,
+    )
+    return serializar_quota_copilot(resultado)
+
+
 async def processar_com_copilot(
     prompt_usuario: str,
     historico_mensagens: list[dict[str, Any]],
@@ -1065,6 +1099,14 @@ async def processar_com_copilot(
                     ai_credits=round(float(nano_aiu) / 1_000_000_000, 6),
                     input_tokens=tokens_input,
                     output_tokens=tokens_output,
+                )
+            try:
+                quota = await consultar_quota_copilot(client, access_token)
+                await emitir_evento(callback, "quota", itens=quota)
+            except Exception as exc:
+                logger.warning(
+                    "Não foi possível consultar a quota do Copilot: %s",
+                    type(exc).__name__,
                 )
             return texto_resposta, modelo, mcp_chamado, None
         finally:
@@ -1453,6 +1495,37 @@ async def github_auth_me(
     session: tuple[str, str, str] = Depends(obter_sessao_autenticada),
 ):
     return {"login": session[2]}
+
+
+@app.get("/copilot/quota")
+async def copilot_quota(
+    session: tuple[str, str, str] = Depends(obter_sessao_autenticada),
+):
+    from copilot import CopilotClient
+
+    with tempfile.TemporaryDirectory(prefix="vetra-quota-") as diretorio:
+        client = CopilotClient(
+            github_token=session[1],
+            use_logged_in_user=False,
+            mode="empty",
+            base_directory=diretorio,
+        )
+        try:
+            await client.start()
+            return {"itens": await consultar_quota_copilot(client, session[1])}
+        except Exception as exc:
+            logger.warning(
+                "Falha ao consultar a quota do Copilot: %s", type(exc).__name__
+            )
+            raise HTTPException(
+                status_code=502,
+                detail="Não foi possível consultar os créditos do Copilot.",
+            ) from exc
+        finally:
+            try:
+                await client.stop()
+            except Exception:
+                logger.warning("Falha ao encerrar o cliente de quota.")
 
 
 @app.post("/auth/github/logout")
