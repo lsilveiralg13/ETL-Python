@@ -73,7 +73,7 @@ Configurações adicionais do backend (todas opcionais):
 * `VETRA_MAX_RAG_DOCUMENT_CHARS` (200000), `VETRA_MAX_PDF_PAGES` (500).
 * `VETRA_MAX_UPLOAD_BYTES` (10 MiB), `VETRA_MAX_ATTACHMENTS` (10), `VETRA_MAX_ATTACHMENT_TEXT_CHARS` (100000), `VETRA_MAX_TEXTO_RAG` (90000) e `VETRA_OCR_LANG` (`por+eng`). O dataset de feedback fica limitado a 200 registros por sessão.
 * `VETRA_RAG_DEPARTMENT` (TI) e `VETRA_RAG_ACCESS_LEVEL` (1) definem a identidade de acesso do worker MCP. Em ambientes multiusuário, a identidade deve ser vinculada à autenticação do usuário, não ampliada via argumentos do LLM.
-* `VETRA_COPILOT_MODEL` (`gpt-5.4`) define o modelo Copilot; `VETRA_COPILOT_MAX_AI_CREDITS_PER_REQUEST` (`5`) define o limite suave de créditos por sessão de consulta.
+* `VETRA_COPILOT_MODEL` (`gpt-5.4`) define o modelo Copilot; `VETRA_COPILOT_MAX_AI_CREDITS_PER_REQUEST` (`30`, mínimo aceito pelo SDK; valores menores são elevados para 30) define o limite de créditos por sessão de consulta.
 
 [v1.2.0] — 2026-09-28
 

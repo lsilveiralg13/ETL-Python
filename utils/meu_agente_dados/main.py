@@ -92,8 +92,9 @@ MAX_TOTAL_ANEXOS_BYTES = int(
     os.environ.get("VETRA_MAX_TOTAL_ATTACHMENT_BYTES", str(25 * 1024 * 1024))
 )
 COPILOT_MODEL = os.environ.get("VETRA_COPILOT_MODEL", "gpt-5.4").strip()
+COPILOT_MIN_AI_CREDITS = 30.0
 COPILOT_MAX_AI_CREDITS = float(
-    os.environ.get("VETRA_COPILOT_MAX_AI_CREDITS_PER_REQUEST", "5")
+    os.environ.get("VETRA_COPILOT_MAX_AI_CREDITS_PER_REQUEST", "30")
 )
 DIALETOS_SQL = {
     "postgres": ("PostgreSQL", "postgres"),
@@ -149,10 +150,14 @@ for nome_limite, valor_limite in {
 }.items():
     if valor_limite <= 0:
         raise ValueError(f"{nome_limite} deve ser maior que zero.")
-if COPILOT_MAX_AI_CREDITS <= 0:
-    raise ValueError("VETRA_COPILOT_MAX_AI_CREDITS_PER_REQUEST deve ser maior que zero.")
-
 logger = logging.getLogger("vetra.api")
+if COPILOT_MAX_AI_CREDITS < COPILOT_MIN_AI_CREDITS:
+    logger.warning(
+        "VETRA_COPILOT_MAX_AI_CREDITS_PER_REQUEST=%s está abaixo do mínimo do SDK; usando %s.",
+        COPILOT_MAX_AI_CREDITS,
+        COPILOT_MIN_AI_CREDITS,
+    )
+    COPILOT_MAX_AI_CREDITS = COPILOT_MIN_AI_CREDITS
 github_copilot_auth = GitHubCopilotAuth()
 
 
